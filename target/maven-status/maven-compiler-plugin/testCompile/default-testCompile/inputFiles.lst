@@ -1,6 +1,0 @@
-/home/loite/wsgoogle/java-spanner-change-capturer/src/test/java/com/google/cloud/spanner/capturer/it/ITSpannerTailerTest.java
-/home/loite/wsgoogle/java-spanner-change-capturer/src/test/java/com/google/cloud/spanner/publisher/it/ITEventPublisherTest.java
-/home/loite/wsgoogle/java-spanner-change-capturer/src/test/java/com/google/cloud/spanner/capturer/SpannerTailerTest.java
-/home/loite/wsgoogle/java-spanner-change-capturer/src/test/java/com/google/cloud/spanner/capturer/RandomResultSetGenerator.java
-/home/loite/wsgoogle/java-spanner-change-capturer/src/test/java/com/google/cloud/spanner/capturer/AbstractMockServerTest.java
-/home/loite/wsgoogle/java-spanner-change-capturer/src/test/java/com/google/cloud/spanner/publisher/SpannerToAvroTest.java

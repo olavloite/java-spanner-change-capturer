@@ -1,6 +1,0 @@
-/home/loite/wsgoogle/java-spanner-change-capturer/src/main/java/com/google/cloud/spanner/capturer/SpannerTailer.java
-/home/loite/wsgoogle/java-spanner-change-capturer/src/main/java/com/google/cloud/spanner/capturer/SpannerChangeCapturer.java
-/home/loite/wsgoogle/java-spanner-change-capturer/src/main/java/com/google/cloud/spanner/capturer/RowImpl.java
-/home/loite/wsgoogle/java-spanner-change-capturer/src/main/java/com/google/cloud/spanner/capturer/SpannerUtils.java
-/home/loite/wsgoogle/java-spanner-change-capturer/src/main/java/com/google/cloud/spanner/publisher/SpannerChangeEventPublisher.java
-/home/loite/wsgoogle/java-spanner-change-capturer/src/main/java/com/google/cloud/spanner/publisher/SpannerToAvro.java
