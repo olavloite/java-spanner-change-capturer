@@ -1,13 +1,30 @@
-package com.google.cloud.spanner.publisher;
+/*
+ * Copyright 2020 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.cloud.spanner.cdc;
 
 import com.google.auth.Credentials;
 import com.google.auth.oauth2.GoogleCredentials;
-import com.google.cloud.spanner.capturer.SpannerDatabaseChangeCapturer;
-import com.google.cloud.spanner.publisher.SpannerTableChangeEventPublisher.Builder;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Stopwatch;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -76,6 +93,7 @@ public class SpannerDatabaseChangeEventPublisher {
 
   public void start() {
     Preconditions.checkArgument(!started, "This event publisher has already been started");
+    logger.log(Level.FINE, "Starting event publisher");
     started = true;
     for (SpannerTableChangeEventPublisher publisher : publishers) {
       publisher.start();
@@ -85,9 +103,23 @@ public class SpannerDatabaseChangeEventPublisher {
   public void stop() {
     Preconditions.checkArgument(started, "This event publisher has not been started");
     Preconditions.checkArgument(!stopped, "This event publisher has already been stopped");
+    logger.log(Level.FINE, "Stopping event publisher");
     stopped = true;
     for (SpannerTableChangeEventPublisher publisher : publishers) {
       publisher.stop();
     }
+  }
+
+  public boolean awaitTermination(long duration, TimeUnit unit) throws InterruptedException {
+    Stopwatch watch = Stopwatch.createStarted();
+    boolean res = true;
+    for (SpannerTableChangeEventPublisher publisher : publishers) {
+      long remainingDuration = duration - watch.elapsed(unit);
+      if (remainingDuration <= 0) {
+        return false;
+      }
+      res = res && publisher.awaitTermination(duration, unit);
+    }
+    return res;
   }
 }

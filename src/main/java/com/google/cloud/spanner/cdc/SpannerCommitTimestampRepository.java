@@ -1,4 +1,20 @@
-package com.google.cloud.spanner.capturer;
+/*
+ * Copyright 2020 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.cloud.spanner.cdc;
 
 import com.google.api.client.util.Preconditions;
 import com.google.cloud.Timestamp;
@@ -21,12 +37,14 @@ import java.util.Collections;
  * The table name and column names are configurable.
  */
 public class SpannerCommitTimestampRepository implements CommitTimestampRepository {
-  public static final String DEFAULT_TABLE_NAME = "LAST_SEEN_COMMIT_TIMESTAMPS";
-  private static final String FIND_TABLE_STATEMENT =
+  static final String DEFAULT_TABLE_NAME = "LAST_SEEN_COMMIT_TIMESTAMPS";
+  static final String DEFAULT_TABLE_NAME_COLUMN_NAME = "TABLE_NAME";
+  static final String DEFAULT_COMMIT_TIMESTAMP_COLUMN_NAME = "LAST_SEEN_COMMIT_TIMESTAMP";
+  static final String FIND_TABLE_STATEMENT =
       "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME=@table";
-  private static final String FIND_COLUMNS_STATEMENT =
+  static final String FIND_COLUMNS_STATEMENT =
       "SELECT COLUMN_NAME, SPANNER_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=@table ORDER BY ORDINAL_POSITION";
-  private static final String FIND_PK_COLUMNS_STATEMENT =
+  static final String FIND_PK_COLUMNS_STATEMENT =
       "SELECT INDEX_COLUMNS.COLUMN_NAME\n"
           + "FROM INFORMATION_SCHEMA.INDEXES\n"
           + "INNER JOIN INFORMATION_SCHEMA.INDEX_COLUMNS \n"
@@ -39,8 +57,8 @@ public class SpannerCommitTimestampRepository implements CommitTimestampReposito
   public static class Builder {
     private final DatabaseClient client;
     private String commitTimestampsTable = DEFAULT_TABLE_NAME;
-    private String tableCol = "TABLE_NAME";
-    private String tsCol = "LAST_SEEN_COMMIT_TIMESTAMP";
+    private String tableCol = DEFAULT_TABLE_NAME_COLUMN_NAME;
+    private String tsCol = DEFAULT_COMMIT_TIMESTAMP_COLUMN_NAME;
 
     private Builder(DatabaseClient client) {
       this.client = Preconditions.checkNotNull(client);

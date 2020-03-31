@@ -15,8 +15,11 @@
     <spanner.version>1.52.0</spanner.version>
     <gax.version>1.54.0</gax.version>
     <junit.version>4.13</junit.version>
+    <truth.version>1.0.1</truth.version>
+    <mockito.version>3.3.3</mockito.version>
     
     <pubsub.version>1.103.1</pubsub.version>
+    <pubsub.grpc.version>1.85.1</pubsub.grpc.version>
     <avro.version>1.9.2</avro.version>
     <netty.version>4.1.37.Final</netty.version>
     <grpc.version>1.27.2</grpc.version>
@@ -59,7 +62,7 @@
       <dependency>
         <groupId>com.google.truth</groupId>
         <artifactId>truth</artifactId>
-        <version>1.0.1</version>
+        <version>${truth.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -97,6 +100,13 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+        <groupId>org.mockito</groupId>
+        <artifactId>mockito-core</artifactId>
+        <version>${mockito.version}</version>
+        <scope>test</scope>
+    </dependency>
+    
+    <dependency>
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-spanner</artifactId>
       <version>${spanner.version}</version>
@@ -107,6 +117,12 @@
       <groupId>com.google.api.grpc</groupId>
       <artifactId>grpc-google-cloud-spanner-v1</artifactId>
       <version>${spanner.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.google.api.grpc</groupId>
+      <artifactId>grpc-google-cloud-pubsub-v1</artifactId>
+      <version>${pubsub.grpc.version}</version>
       <scope>test</scope>
     </dependency>
     <dependency>

@@ -1,18 +1,42 @@
-package com.google.cloud.spanner.publisher;
+/*
+ * Copyright 2020 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.cloud.spanner.cdc;
 
 import com.google.api.core.ApiFuture;
 import com.google.api.core.ApiFutureCallback;
 import com.google.api.core.ApiFutures;
+import com.google.api.gax.core.CredentialsProvider;
 import com.google.api.gax.core.FixedCredentialsProvider;
+import com.google.api.gax.core.NoCredentialsProvider;
+import com.google.api.gax.grpc.GrpcTransportChannel;
+import com.google.api.gax.rpc.FixedTransportChannelProvider;
+import com.google.api.gax.rpc.TransportChannelProvider;
 import com.google.auth.Credentials;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.pubsub.v1.Publisher;
-import com.google.cloud.spanner.capturer.SpannerTableChangeCapturer;
-import com.google.cloud.spanner.capturer.SpannerTableChangeCapturer.Row;
-import com.google.cloud.spanner.capturer.SpannerTableChangeCapturer.RowChangeCallback;
+import com.google.cloud.pubsub.v1.stub.PublisherStubSettings;
+import com.google.cloud.spanner.cdc.SpannerTableChangeCapturer.Row;
+import com.google.cloud.spanner.cdc.SpannerTableChangeCapturer.RowChangeCallback;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.pubsub.v1.PubsubMessage;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -33,6 +57,8 @@ public class SpannerTableChangeEventPublisher {
     private Publisher publisher;
     private String topicName;
     private Credentials credentials;
+    private String endpoint = PublisherStubSettings.getDefaultEndpoint();
+    private boolean usePlainText;
 
     private Builder(SpannerTableChangeCapturer capturer) {
       this.capturer = capturer;
@@ -56,6 +82,18 @@ public class SpannerTableChangeEventPublisher {
           publisher == null,
           "Set either the Publisher or the TopicName and Credentials, but not both.");
       this.credentials = Preconditions.checkNotNull(credentials);
+      return this;
+    }
+
+    @VisibleForTesting
+    Builder setEndpoint(String endpoint) {
+      this.endpoint = Preconditions.checkNotNull(endpoint);
+      return this;
+    }
+
+    @VisibleForTesting
+    Builder usePlainText() {
+      this.usePlainText = true;
       return this;
     }
 
@@ -103,10 +141,20 @@ public class SpannerTableChangeEventPublisher {
         throw new IllegalArgumentException(
             "There is no credentials set on the builder, and the environment has no default credentials set.");
       }
-      this.publisher =
+      Publisher.Builder publisherBuilder =
           Publisher.newBuilder(builder.topicName)
               .setCredentialsProvider(FixedCredentialsProvider.create(credentials))
-              .build();
+              .setEndpoint(builder.endpoint);
+      if (builder.usePlainText) {
+        ManagedChannel channel =
+            ManagedChannelBuilder.forTarget(builder.endpoint).usePlaintext().build();
+        TransportChannelProvider channelProvider =
+            FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel));
+        CredentialsProvider credentialsProvider = NoCredentialsProvider.create();
+        publisherBuilder.setChannelProvider(channelProvider);
+        publisherBuilder.setCredentialsProvider(credentialsProvider);
+      }
+      this.publisher = publisherBuilder.build();
     }
     this.capturer = builder.capturer;
     this.converter = new SpannerToAvro(capturer.getDatabaseClient(), capturer.getTable());
@@ -155,12 +203,11 @@ public class SpannerTableChangeEventPublisher {
   public void stop() {
     Preconditions.checkState(started, "This event publisher has not been started");
     Preconditions.checkState(!stopped, "This event publisher has already been stopped");
-    capturer.stop();
+    capturer.stopAsync();
     publisher.shutdown();
-    try {
-      publisher.awaitTermination(1L, TimeUnit.MINUTES);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    }
+  }
+
+  public boolean awaitTermination(long duration, TimeUnit unit) throws InterruptedException {
+    return publisher.awaitTermination(duration, unit);
   }
 }

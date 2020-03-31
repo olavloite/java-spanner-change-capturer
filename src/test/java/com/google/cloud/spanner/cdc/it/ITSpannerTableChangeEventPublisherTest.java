@@ -1,4 +1,20 @@
-package com.google.cloud.spanner.publisher.it;
+/*
+ * Copyright 2020 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.cloud.spanner.cdc.it;
 
 import static com.google.common.truth.Truth.assertThat;
 
@@ -16,11 +32,9 @@ import com.google.cloud.spanner.Mutation;
 import com.google.cloud.spanner.Spanner;
 import com.google.cloud.spanner.SpannerOptions;
 import com.google.cloud.spanner.Value;
-import com.google.cloud.spanner.capturer.SpannerDatabaseChangeCapturer;
-import com.google.cloud.spanner.capturer.SpannerDatabaseTailer;
-import com.google.cloud.spanner.capturer.it.ITConfig;
-import com.google.cloud.spanner.capturer.it.ITSpannerTableTailerTest;
-import com.google.cloud.spanner.publisher.SpannerDatabaseChangeEventPublisher;
+import com.google.cloud.spanner.cdc.SpannerTableChangeCapturer;
+import com.google.cloud.spanner.cdc.SpannerTableChangeEventPublisher;
+import com.google.cloud.spanner.cdc.SpannerTableTailer;
 import com.google.pubsub.v1.PubsubMessage;
 import com.google.pubsub.v1.PushConfig;
 import java.util.ArrayList;
@@ -39,16 +53,15 @@ import org.junit.runners.JUnit4;
 import org.threeten.bp.Duration;
 
 @RunWith(JUnit4.class)
-public class ITSpannerDatabaseChangeEventPublisherTest {
+public class ITSpannerTableChangeEventPublisherTest {
   private static final Logger logger = Logger.getLogger(ITSpannerTableTailerTest.class.getName());
   private static final String DATABASE_ID =
       String.format("cdc-db-%08d", new Random().nextInt(100000000));
-  private static final String[] tables = new String[] {"NUMBERS1", "NUMBERS2"};
   private static Spanner spanner;
   private static TopicAdminClient topicAdminClient;
   private static SubscriptionAdminClient subAdminClient;
   private static Database database;
-  private static Subscriber[] subscribers;
+  private static Subscriber subscriber;
   private static List<PubsubMessage> receivedMessages =
       Collections.synchronizedList(new ArrayList<>());
   private static CountDownLatch receivedMessagesCount = new CountDownLatch(0);
@@ -68,8 +81,7 @@ public class ITSpannerDatabaseChangeEventPublisherTest {
                 ITConfig.SPANNER_INSTANCE_ID,
                 DATABASE_ID,
                 Arrays.asList(
-                    "CREATE TABLE NUMBERS1 (ID INT64 NOT NULL, NAME STRING(100), LAST_MODIFIED TIMESTAMP OPTIONS (allow_commit_timestamp=true)) PRIMARY KEY (ID)",
-                    "CREATE TABLE NUMBERS2 (ID INT64 NOT NULL, NAME STRING(100), LAST_MODIFIED TIMESTAMP OPTIONS (allow_commit_timestamp=true)) PRIMARY KEY (ID)",
+                    "CREATE TABLE NUMBERS (ID INT64 NOT NULL, NAME STRING(100), LAST_MODIFIED TIMESTAMP OPTIONS (allow_commit_timestamp=true)) PRIMARY KEY (ID)",
                     "CREATE TABLE LAST_SEEN_COMMIT_TIMESTAMPS (TABLE_NAME STRING(MAX) NOT NULL, LAST_SEEN_COMMIT_TIMESTAMP TIMESTAMP NOT NULL) PRIMARY KEY (TABLE_NAME)"))
             .get();
     logger.info(String.format("Created database %s", DATABASE_ID.toString()));
@@ -80,48 +92,45 @@ public class ITSpannerDatabaseChangeEventPublisherTest {
                 .setCredentialsProvider(
                     FixedCredentialsProvider.create(ITConfig.getPubSubCredentials()))
                 .build());
+    topicAdminClient.createTopic(
+        String.format(
+            "projects/%s/topics/%s", ITConfig.PUBSUB_PROJECT_ID, ITConfig.PUBSUB_TOPIC_ID));
+    logger.info(String.format("Created topic %s", ITConfig.PUBSUB_TOPIC_ID));
+
     subAdminClient =
         SubscriptionAdminClient.create(
             SubscriptionAdminSettings.newBuilder()
                 .setCredentialsProvider(
                     FixedCredentialsProvider.create(ITConfig.getPubSubCredentials()))
                 .build());
+    subAdminClient.createSubscription(
+        String.format(
+            "projects/%s/subscriptions/%s",
+            ITConfig.PUBSUB_PROJECT_ID, ITConfig.PUBSUB_SUBSCRIPTION_ID),
+        String.format(
+            "projects/%s/topics/%s", ITConfig.PUBSUB_PROJECT_ID, ITConfig.PUBSUB_TOPIC_ID),
+        PushConfig.getDefaultInstance(),
+        10);
+    logger.info(String.format("Created subscription %s", ITConfig.PUBSUB_SUBSCRIPTION_ID));
 
-    subscribers = new Subscriber[tables.length];
-    int i = 0;
-    for (String table : tables) {
-      topicAdminClient.createTopic(
-          String.format("projects/%s/topics/spanner-update-%s", ITConfig.PUBSUB_PROJECT_ID, table));
-      logger.info(String.format("Created topic for table %s", table));
-
-      subAdminClient.createSubscription(
-          String.format(
-              "projects/%s/subscriptions/spanner-update-%s", ITConfig.PUBSUB_PROJECT_ID, table),
-          String.format("projects/%s/topics/spanner-update-%s", ITConfig.PUBSUB_PROJECT_ID, table),
-          PushConfig.getDefaultInstance(),
-          10);
-      logger.info(String.format("Created subscription spanner-update-%s", table));
-
-      subscribers[i] =
-          Subscriber.newBuilder(
-                  String.format(
-                      "projects/%s/subscriptions/spanner-update-%s",
-                      ITConfig.PUBSUB_PROJECT_ID, table),
-                  new MessageReceiver() {
-                    @Override
-                    public void receiveMessage(PubsubMessage message, AckReplyConsumer consumer) {
-                      logger.info(String.format("Received message %s", message.toString()));
-                      receivedMessages.add(message);
-                      receivedMessagesCount.countDown();
-                      consumer.ack();
-                    }
-                  })
-              .setCredentialsProvider(
-                  FixedCredentialsProvider.create(ITConfig.getPubSubCredentials()))
-              .build();
-      subscribers[i].startAsync().awaitRunning();
-      i++;
-    }
+    subscriber =
+        Subscriber.newBuilder(
+                String.format(
+                    "projects/%s/subscriptions/%s",
+                    ITConfig.PUBSUB_PROJECT_ID, ITConfig.PUBSUB_SUBSCRIPTION_ID),
+                new MessageReceiver() {
+                  @Override
+                  public void receiveMessage(PubsubMessage message, AckReplyConsumer consumer) {
+                    logger.info(String.format("Received message %s", message.toString()));
+                    receivedMessages.add(message);
+                    receivedMessagesCount.countDown();
+                    consumer.ack();
+                  }
+                })
+            .setCredentialsProvider(
+                FixedCredentialsProvider.create(ITConfig.getPubSubCredentials()))
+            .build();
+    subscriber.startAsync().awaitRunning();
   }
 
   @AfterClass
@@ -129,34 +138,31 @@ public class ITSpannerDatabaseChangeEventPublisherTest {
     database.drop();
     logger.info("Dropped test database");
     spanner.close();
-    for (Subscriber subscriber : subscribers) {
-      subscriber.stopAsync();
-    }
+    subscriber.stopAsync();
 
-    for (String table : tables) {
-      subAdminClient.deleteSubscription(
-          String.format(
-              "projects/%s/subscriptions/spanner-update-%s", ITConfig.PUBSUB_PROJECT_ID, table));
-      logger.info(String.format("Dropped test subscription %s", table));
-      topicAdminClient.deleteTopic(
-          String.format("projects/%s/topics/spanner-update-%s", ITConfig.PUBSUB_PROJECT_ID, table));
-      logger.info(String.format("Dropped test topic %s", table));
-    }
+    subAdminClient.deleteSubscription(
+        String.format(
+            "projects/%s/subscriptions/%s",
+            ITConfig.PUBSUB_PROJECT_ID, ITConfig.PUBSUB_SUBSCRIPTION_ID));
+    logger.info("Dropped test subscription");
+    topicAdminClient.deleteTopic(
+        String.format(
+            "projects/%s/topics/%s", ITConfig.PUBSUB_PROJECT_ID, ITConfig.PUBSUB_TOPIC_ID));
+    logger.info("Dropped test topic");
   }
 
   @Test
   public void testEventPublisher() throws Exception {
     DatabaseClient client = spanner.getDatabaseClient(database.getId());
-    SpannerDatabaseChangeCapturer capturer =
-        SpannerDatabaseTailer.newBuilder(client)
-            .setAllTables()
+    SpannerTableChangeCapturer capturer =
+        SpannerTableTailer.newBuilder(client, "NUMBERS")
             .setPollInterval(Duration.ofMillis(50L))
             .build();
-    SpannerDatabaseChangeEventPublisher eventPublisher =
-        SpannerDatabaseChangeEventPublisher.newBuilder(capturer)
-            .setTopicNameFormat(
+    SpannerTableChangeEventPublisher eventPublisher =
+        SpannerTableChangeEventPublisher.newBuilder(capturer)
+            .setTopicName(
                 String.format(
-                    "projects/%s/topics/spanner-update-%%table%%", ITConfig.PUBSUB_PROJECT_ID))
+                    "projects/%s/topics/%s", ITConfig.PUBSUB_PROJECT_ID, ITConfig.PUBSUB_TOPIC_ID))
             .setCredentials(ITConfig.getPubSubCredentials())
             .build();
     eventPublisher.start();
@@ -164,7 +170,7 @@ public class ITSpannerDatabaseChangeEventPublisherTest {
     receivedMessagesCount = new CountDownLatch(3);
     client.writeAtLeastOnce(
         Arrays.asList(
-            Mutation.newInsertOrUpdateBuilder("NUMBERS1")
+            Mutation.newInsertOrUpdateBuilder("NUMBERS")
                 .set("ID")
                 .to(1L)
                 .set("NAME")
@@ -172,7 +178,7 @@ public class ITSpannerDatabaseChangeEventPublisherTest {
                 .set("LAST_MODIFIED")
                 .to(Value.COMMIT_TIMESTAMP)
                 .build(),
-            Mutation.newInsertOrUpdateBuilder("NUMBERS2")
+            Mutation.newInsertOrUpdateBuilder("NUMBERS")
                 .set("ID")
                 .to(2L)
                 .set("NAME")
@@ -180,24 +186,16 @@ public class ITSpannerDatabaseChangeEventPublisherTest {
                 .set("LAST_MODIFIED")
                 .to(Value.COMMIT_TIMESTAMP)
                 .build(),
-            Mutation.newInsertOrUpdateBuilder("NUMBERS1")
+            Mutation.newInsertOrUpdateBuilder("NUMBERS")
                 .set("ID")
                 .to(3L)
                 .set("NAME")
                 .to("THREE")
                 .set("LAST_MODIFIED")
                 .to(Value.COMMIT_TIMESTAMP)
-                .build(),
-            Mutation.newInsertOrUpdateBuilder("NUMBERS2")
-                .set("ID")
-                .to(4L)
-                .set("NAME")
-                .to("FOUR")
-                .set("LAST_MODIFIED")
-                .to(Value.COMMIT_TIMESTAMP)
                 .build()));
     receivedMessagesCount.await(10L, TimeUnit.SECONDS);
-    assertThat(receivedMessages).hasSize(4);
+    assertThat(receivedMessages).hasSize(3);
     eventPublisher.stop();
   }
 }

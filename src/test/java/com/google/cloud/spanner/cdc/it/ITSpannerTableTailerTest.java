@@ -1,4 +1,20 @@
-package com.google.cloud.spanner.capturer.it;
+/*
+ * Copyright 2020 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.cloud.spanner.cdc.it;
 
 import static com.google.common.truth.Truth.assertThat;
 
@@ -11,9 +27,9 @@ import com.google.cloud.spanner.Spanner;
 import com.google.cloud.spanner.SpannerOptions;
 import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.Value;
-import com.google.cloud.spanner.capturer.SpannerDatabaseTailer;
-import com.google.cloud.spanner.capturer.SpannerTableChangeCapturer.Row;
-import com.google.cloud.spanner.capturer.SpannerTableChangeCapturer.RowChangeCallback;
+import com.google.cloud.spanner.cdc.SpannerTableChangeCapturer.Row;
+import com.google.cloud.spanner.cdc.SpannerTableChangeCapturer.RowChangeCallback;
+import com.google.cloud.spanner.cdc.SpannerTableTailer;
 import com.google.common.base.Stopwatch;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -31,9 +47,8 @@ import org.junit.runners.JUnit4;
 import org.threeten.bp.Duration;
 
 @RunWith(JUnit4.class)
-public class ITSpannerDatabaseTailerTest {
-  private static final Logger logger =
-      Logger.getLogger(ITSpannerDatabaseTailerTest.class.getName());
+public class ITSpannerTableTailerTest {
+  private static final Logger logger = Logger.getLogger(ITSpannerTableTailerTest.class.getName());
   private static final String DATABASE_ID =
       String.format("cdc-db-%08d", new Random().nextInt(100000000));
   private static Spanner spanner;
@@ -54,8 +69,7 @@ public class ITSpannerDatabaseTailerTest {
                 ITConfig.SPANNER_INSTANCE_ID,
                 DATABASE_ID,
                 Arrays.asList(
-                    "CREATE TABLE NUMBERS1 (ID INT64 NOT NULL, NAME STRING(100), LAST_MODIFIED TIMESTAMP OPTIONS (allow_commit_timestamp=true)) PRIMARY KEY (ID)",
-                    "CREATE TABLE NUMBERS2 (ID INT64 NOT NULL, NAME STRING(100), LAST_MODIFIED TIMESTAMP OPTIONS (allow_commit_timestamp=true)) PRIMARY KEY (ID)",
+                    "CREATE TABLE NUMBERS (ID INT64 NOT NULL, NAME STRING(100), LAST_MODIFIED TIMESTAMP OPTIONS (allow_commit_timestamp=true)) PRIMARY KEY (ID)",
                     "CREATE TABLE LAST_SEEN_COMMIT_TIMESTAMPS (TABLE_NAME STRING(MAX) NOT NULL, LAST_SEEN_COMMIT_TIMESTAMP TIMESTAMP NOT NULL) PRIMARY KEY (TABLE_NAME)"))
             .get();
     logger.info(String.format("Created database %s", DATABASE_ID.toString()));
@@ -70,9 +84,8 @@ public class ITSpannerDatabaseTailerTest {
   @Test
   public void testSpannerTailer() throws InterruptedException {
     DatabaseClient client = spanner.getDatabaseClient(database.getId());
-    SpannerDatabaseTailer tailer =
-        SpannerDatabaseTailer.newBuilder(client)
-            .setAllTables()
+    SpannerTableTailer tailer =
+        SpannerTableTailer.newBuilder(client, "NUMBERS")
             .setPollInterval(Duration.ofMillis(10L))
             .build();
     final Queue<Struct> changes = new ConcurrentLinkedQueue<>();
@@ -89,7 +102,7 @@ public class ITSpannerDatabaseTailerTest {
     Timestamp commitTs =
         client.writeAtLeastOnce(
             Arrays.asList(
-                Mutation.newInsertOrUpdateBuilder("NUMBERS1")
+                Mutation.newInsertOrUpdateBuilder("NUMBERS")
                     .set("ID")
                     .to(1L)
                     .set("NAME")
@@ -97,7 +110,7 @@ public class ITSpannerDatabaseTailerTest {
                     .set("LAST_MODIFIED")
                     .to(Value.COMMIT_TIMESTAMP)
                     .build(),
-                Mutation.newInsertOrUpdateBuilder("NUMBERS2")
+                Mutation.newInsertOrUpdateBuilder("NUMBERS")
                     .set("ID")
                     .to(2L)
                     .set("NAME")
@@ -105,7 +118,7 @@ public class ITSpannerDatabaseTailerTest {
                     .set("LAST_MODIFIED")
                     .to(Value.COMMIT_TIMESTAMP)
                     .build(),
-                Mutation.newInsertOrUpdateBuilder("NUMBERS1")
+                Mutation.newInsertOrUpdateBuilder("NUMBERS")
                     .set("ID")
                     .to(3L)
                     .set("NAME")
@@ -145,7 +158,7 @@ public class ITSpannerDatabaseTailerTest {
     commitTs =
         client.writeAtLeastOnce(
             Arrays.asList(
-                Mutation.newInsertOrUpdateBuilder("NUMBERS2")
+                Mutation.newInsertOrUpdateBuilder("NUMBERS")
                     .set("ID")
                     .to(4L)
                     .set("NAME")
@@ -153,7 +166,7 @@ public class ITSpannerDatabaseTailerTest {
                     .set("LAST_MODIFIED")
                     .to(Value.COMMIT_TIMESTAMP)
                     .build(),
-                Mutation.newInsertOrUpdateBuilder("NUMBERS1")
+                Mutation.newInsertOrUpdateBuilder("NUMBERS")
                     .set("ID")
                     .to(5L)
                     .set("NAME")
@@ -185,7 +198,7 @@ public class ITSpannerDatabaseTailerTest {
     commitTs =
         client.writeAtLeastOnce(
             Arrays.asList(
-                Mutation.newUpdateBuilder("NUMBERS1")
+                Mutation.newUpdateBuilder("NUMBERS")
                     .set("ID")
                     .to(1L)
                     .set("NAME")
@@ -193,7 +206,7 @@ public class ITSpannerDatabaseTailerTest {
                     .set("LAST_MODIFIED")
                     .to(Value.COMMIT_TIMESTAMP)
                     .build(),
-                Mutation.newUpdateBuilder("NUMBERS1")
+                Mutation.newUpdateBuilder("NUMBERS")
                     .set("ID")
                     .to(5L)
                     .set("NAME")
@@ -226,7 +239,7 @@ public class ITSpannerDatabaseTailerTest {
     commitTs =
         client.writeAtLeastOnce(
             Arrays.asList(
-                Mutation.delete("NUMBERS2", Key.of(2L)), Mutation.delete("NUMBERS1", Key.of(3L))));
+                Mutation.delete("NUMBERS", Key.of(2L)), Mutation.delete("NUMBERS", Key.of(3L))));
     Thread.sleep(500L);
     assertThat(changes).isEmpty();
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Google LLC
+ * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.google.cloud.spanner.capturer;
+package com.google.cloud.spanner.cdc;
 
 import com.google.api.client.util.Base64;
 import com.google.cloud.Date;
@@ -85,6 +85,58 @@ public class RandomResultSetGenerator {
     ResultSetMetadata.Builder builder = ResultSetMetadata.newBuilder();
     builder.setRowType(rowTypeBuilder.build());
     return builder.build();
+  }
+
+  static final ResultSet generateRandomResultSetInformationSchemaResultSet() {
+    ResultSet.Builder builder = ResultSet.newBuilder();
+    for (int col = 0; col < TYPES.length; col++) {
+      String typeName;
+      if (TYPES[col].getCode() == TypeCode.ARRAY) {
+        typeName = "ARRAY<" + getSpannerTypeName(TYPES[col].getArrayElementType().getCode()) + ">";
+      } else {
+        typeName = getSpannerTypeName(TYPES[col].getCode());
+      }
+      builder.addRows(
+          ListValue.newBuilder()
+              .addValues(Value.newBuilder().setStringValue("COL" + col).build())
+              .addValues(Value.newBuilder().setStringValue(typeName).build())
+              .addValues(Value.newBuilder().setStringValue("YES").build())
+              .build());
+    }
+    builder.addRows(
+        ListValue.newBuilder()
+            .addValues(Value.newBuilder().setStringValue("LastModified").build())
+            .addValues(Value.newBuilder().setStringValue("TIMESTAMP").build())
+            .addValues(Value.newBuilder().setStringValue("YES").build()));
+    builder.setMetadata(
+        ResultSetMetadata.newBuilder()
+            .setRowType(
+                StructType.newBuilder()
+                    .addFields(
+                        Field.newBuilder()
+                            .setName("COLUMN_NAME")
+                            .setType(Type.newBuilder().setCode(TypeCode.STRING).build())
+                            .build())
+                    .addFields(
+                        Field.newBuilder()
+                            .setName("SPANNER_TYPE")
+                            .setType(Type.newBuilder().setCode(TypeCode.STRING).build())
+                            .build())
+                    .addFields(
+                        Field.newBuilder()
+                            .setName("IS_NULLABLE")
+                            .setType(Type.newBuilder().setCode(TypeCode.STRING).build())
+                            .build())
+                    .build()));
+    return builder.build();
+  }
+
+  private static String getSpannerTypeName(TypeCode code) {
+    String typeName = code.name();
+    if (code == TypeCode.STRING || code == TypeCode.BYTES) {
+      typeName = typeName + "(MAX)";
+    }
+    return typeName;
   }
 
   private static final ResultSetMetadata METADATA = generateMetadata();

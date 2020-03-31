@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 
-package com.google.cloud.spanner.capturer;
+package com.google.cloud.spanner.cdc;
 
+import com.google.api.core.ApiFuture;
+import com.google.api.core.SettableApiFuture;
 import com.google.cloud.Timestamp;
 import com.google.cloud.spanner.AsyncResultSet;
 import com.google.cloud.spanner.AsyncResultSet.CallbackResponse;
@@ -81,8 +83,9 @@ public class SpannerTableTailer implements SpannerTableChangeCapturer {
 
   // TODO: Check and warn if the commit timestamp column is not part of an index.
 
+  private final Object lock = new Object();
   private boolean started = false;
-  private boolean stopped = false;
+  private SettableApiFuture<Void> stopFuture;
   private final DatabaseClient client;
   private final String table;
   private final CommitTimestampRepository commitTimestampRepository;
@@ -133,13 +136,15 @@ public class SpannerTableTailer implements SpannerTableChangeCapturer {
   }
 
   @Override
-  public void stop() {
-    Preconditions.checkState(started, "This SpannerTailer has not been started");
-    Preconditions.checkState(!stopped, "This SpannerTailer has already been stopped");
-    stopped = true;
-    pollFuture.cancel(true);
-    if (isOwnedExecutor) {
-      executor.shutdown();
+  public ApiFuture<Void> stopAsync() {
+    synchronized (lock) {
+      Preconditions.checkState(started, "This SpannerTailer has not been started");
+      Preconditions.checkState(stopFuture == null, "This SpannerTailer has already been stopped");
+      stopFuture = SettableApiFuture.create();
+      if (isOwnedExecutor) {
+        executor.shutdown();
+      }
+      return stopFuture;
     }
   }
 
@@ -150,22 +155,34 @@ public class SpannerTableTailer implements SpannerTableChangeCapturer {
       this.delegate = delegate;
     }
 
-    private void scheduleNextPoll() {
+    private void scheduleNextPollOrStop() {
       if (lastSeenCommitTimestamp.compareTo(startedPollWithCommitTimestamp) > 0) {
         commitTimestampRepository.set(table, lastSeenCommitTimestamp);
       }
-      pollFuture =
-          executor.schedule(
-              new SpannerTailerRunner(), pollInterval.toMillis(), TimeUnit.MILLISECONDS);
+      synchronized (lock) {
+        if (stopFuture == null) {
+          pollFuture =
+              executor.schedule(
+                  new SpannerTailerRunner(), pollInterval.toMillis(), TimeUnit.MILLISECONDS);
+        } else {
+          stopFuture.set(null);
+        }
+      }
     }
 
     @Override
     public CallbackResponse cursorReady(AsyncResultSet resultSet) {
       try {
         while (true) {
+          synchronized (lock) {
+            if (stopFuture != null) {
+              scheduleNextPollOrStop();
+              return CallbackResponse.DONE;
+            }
+          }
           switch (resultSet.tryNext()) {
             case DONE:
-              scheduleNextPoll();
+              scheduleNextPollOrStop();
               return CallbackResponse.DONE;
             case NOT_READY:
               return CallbackResponse.CONTINUE;
@@ -182,7 +199,7 @@ public class SpannerTableTailer implements SpannerTableChangeCapturer {
         }
       } catch (Throwable t) {
         logger.log(Level.WARNING, "Error processing change set", t);
-        scheduleNextPoll();
+        scheduleNextPollOrStop();
         return CallbackResponse.DONE;
       }
     }
