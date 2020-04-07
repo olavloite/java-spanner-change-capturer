@@ -16,7 +16,6 @@
 
 package com.google.cloud.spanner.cdc;
 
-import com.google.auto.value.AutoValue;
 import com.google.cloud.ByteArray;
 import com.google.cloud.spanner.DatabaseClient;
 import com.google.cloud.spanner.ResultSet;
@@ -569,17 +568,33 @@ class SpannerToAvro {
         });
   }
 
-  @AutoValue
-  abstract static class SchemaSet {
+  static class SchemaSet {
+    private final Schema avroSchema;
+    private final ImmutableMap<String, String> spannerSchema;
+    private final String tsColName;
+
     static SchemaSet create(
         Schema avroSchema, ImmutableMap<String, String> spannerSchema, String tsColName) {
-      return new AutoValue_SpannerToAvro_SchemaSet(avroSchema, spannerSchema, tsColName);
+      return new SchemaSet(avroSchema, spannerSchema, tsColName);
     }
 
-    abstract Schema avroSchema();
+    private SchemaSet(
+        Schema avroSchema, ImmutableMap<String, String> spannerSchema, String tsColName) {
+      this.avroSchema = avroSchema;
+      this.spannerSchema = spannerSchema;
+      this.tsColName = tsColName;
+    }
 
-    abstract ImmutableMap<String, String> spannerSchema();
+    Schema avroSchema() {
+      return avroSchema;
+    }
 
-    public abstract String tsColName();
+    ImmutableMap<String, String> spannerSchema() {
+      return spannerSchema;
+    }
+
+    String tsColName() {
+      return tsColName;
+    }
   }
 }

@@ -63,7 +63,7 @@ public class ITSpannerTableChangeEventPublisherTest {
   private static Database database;
   private static Subscriber subscriber;
   private static List<PubsubMessage> receivedMessages =
-      Collections.synchronizedList(new ArrayList<>());
+      Collections.synchronizedList(new ArrayList<PubsubMessage>());
   private static CountDownLatch receivedMessagesCount = new CountDownLatch(0);
 
   @BeforeClass

@@ -1,19 +1,3 @@
-/*
- * Copyright 2020 Google LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     https://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package com.google.cloud.spanner.cdc;
 
 import static com.google.common.truth.Truth.assertThat;
@@ -49,7 +33,7 @@ import org.junit.runners.JUnit4;
 import org.threeten.bp.Duration;
 
 @RunWith(JUnit4.class)
-public class SpannerTableChangeEventPublisherTest extends AbstractMockServerTest {
+public class SpannerDatabaseChangeEventPublisherTest extends AbstractMockServerTest {
   private static MockPubSubServer mockPubSub;
   private static Server pubSubServer;
   private static InetSocketAddress pubSubAddress;
@@ -87,7 +71,7 @@ public class SpannerTableChangeEventPublisherTest extends AbstractMockServerTest
     DatabaseClient client = spanner.getDatabaseClient(DatabaseId.of("p", "i", "d"));
 
     final AtomicInteger receivedMessages = new AtomicInteger();
-    final CountDownLatch latch = new CountDownLatch(SELECT_FOO_ROW_COUNT);
+    final CountDownLatch latch = new CountDownLatch(SELECT_FOO_ROW_COUNT + SELECT_BAR_ROW_COUNT);
 
     ManagedChannel channel =
         ManagedChannelBuilder.forTarget("localhost:" + pubSubServer.getPort())
@@ -112,20 +96,21 @@ public class SpannerTableChangeEventPublisherTest extends AbstractMockServerTest
             .build();
     subscriber.startAsync().awaitRunning();
 
-    SpannerTableTailer tailer =
-        SpannerTableTailer.newBuilder(client, "Foo")
+    SpannerDatabaseTailer tailer =
+        SpannerDatabaseTailer.newBuilder(client)
+            .setAllTables()
             .setPollInterval(Duration.ofSeconds(100L))
             .build();
-    SpannerTableChangeEventPublisher publisher =
-        SpannerTableChangeEventPublisher.newBuilder(tailer)
+    SpannerDatabaseChangeEventPublisher publisher =
+        SpannerDatabaseChangeEventPublisher.newBuilder(tailer)
             .usePlainText()
             .setEndpoint("localhost:" + pubSubServer.getPort())
-            .setTopicName("projects/p/topics/foo-updates")
+            .setTopicNameFormat("projects/p/topics/%table%-updates")
             .build();
     publisher.start();
-    latch.await(5L, TimeUnit.SECONDS);
+    latch.await(10L, TimeUnit.SECONDS);
     publisher.stop();
-    assertThat(receivedMessages.get()).isEqualTo(SELECT_FOO_ROW_COUNT);
+    assertThat(receivedMessages.get()).isEqualTo(SELECT_FOO_ROW_COUNT + SELECT_BAR_ROW_COUNT);
     publisher.awaitTermination(5L, TimeUnit.SECONDS);
     subscriber.stopAsync().awaitTerminated();
   }

@@ -67,7 +67,6 @@ public abstract class AbstractMockServerTest {
               "SELECT %s FROM %s WHERE ID=1",
               SpannerCommitTimestampRepository.DEFAULT_COMMIT_TIMESTAMP_COLUMN_NAME,
               SpannerCommitTimestampRepository.DEFAULT_TABLE_NAME));
-  // TABLE_NAME
   private static final ResultSetMetadata FIND_LAST_SEEN_COMMIT_TIMESTAMPS_TABLE_METADATA =
       ResultSetMetadata.newBuilder()
           .setRowType(
@@ -91,7 +90,6 @@ public abstract class AbstractMockServerTest {
                       .build())
               .setMetadata(FIND_LAST_SEEN_COMMIT_TIMESTAMPS_TABLE_METADATA)
               .build();
-  // COLUMN_NAME, SPANNER_TYPE
   private static final ResultSetMetadata FIND_LAST_SEEN_COMMIT_TIMESTAMPS_COLUMNS_METADATA =
       ResultSetMetadata.newBuilder()
           .setRowType(
@@ -132,7 +130,6 @@ public abstract class AbstractMockServerTest {
                       .build())
               .setMetadata(FIND_LAST_SEEN_COMMIT_TIMESTAMPS_COLUMNS_METADATA)
               .build();
-  // COLUMN_NAME
   private static final ResultSetMetadata FIND_LAST_SEEN_COMMIT_TIMESTAMPS_PK_METADATA =
       ResultSetMetadata.newBuilder()
           .setRowType(
@@ -156,7 +153,6 @@ public abstract class AbstractMockServerTest {
                   .build())
           .setMetadata(FIND_LAST_SEEN_COMMIT_TIMESTAMPS_PK_METADATA)
           .build();
-  // LAST_SEEN_COMMIT_TIMESTAMP
   private static final ResultSetMetadata GET_LAST_SEEN_COMMIT_TIMESTAMP_METADATA =
       ResultSetMetadata.newBuilder()
           .setRowType(
@@ -178,11 +174,11 @@ public abstract class AbstractMockServerTest {
   private static final Statement FIND_ALL_TABLES_STATEMENT =
       Statement.newBuilder(SpannerDatabaseTailer.LIST_TABLE_NAMES_STATEMENT)
           .bind("excluded")
-          .toStringArray(Collections.emptyList())
+          .toStringArray(Collections.<String>emptyList())
           .bind("allTables")
           .to(true)
           .bind("included")
-          .toStringArray(Collections.emptyList())
+          .toStringArray(Collections.<String>emptyList())
           .bind("schema")
           .to("")
           .bind("catalog")
@@ -211,7 +207,6 @@ public abstract class AbstractMockServerTest {
                   .build())
           .setMetadata(FIND_ALL_TABLES_METADATA)
           .build();
-  // COLUMN_NAME, OPTION_NAME, OPTION_VALUE
   private static final ResultSetMetadata COLUMNS_OPTIONS_METADATA =
       ResultSetMetadata.newBuilder()
           .setRowType(
@@ -237,6 +232,8 @@ public abstract class AbstractMockServerTest {
   // SpannerToAvro statements.
   private static final Statement SPANNER_TO_AVRO_SCHEMA_FOO_STATEMENT =
       Statement.newBuilder(SpannerToAvro.SCHEMA_QUERY).bind("table").to("Foo").build();
+  private static final Statement SPANNER_TO_AVRO_SCHEMA_BAR_STATEMENT =
+      Statement.newBuilder(SpannerToAvro.SCHEMA_QUERY).bind("table").to("Bar").build();
 
   // Poll Foo statements.
   private static final Statement COLUMN_OPTIONS_FOO_STATEMENT =
@@ -334,6 +331,10 @@ public abstract class AbstractMockServerTest {
     mockSpanner.putStatementResult(
         StatementResult.query(
             SPANNER_TO_AVRO_SCHEMA_FOO_STATEMENT,
+            RandomResultSetGenerator.generateRandomResultSetInformationSchemaResultSet()));
+    mockSpanner.putStatementResult(
+        StatementResult.query(
+            SPANNER_TO_AVRO_SCHEMA_BAR_STATEMENT,
             RandomResultSetGenerator.generateRandomResultSetInformationSchemaResultSet()));
 
     spanner = createSpanner();

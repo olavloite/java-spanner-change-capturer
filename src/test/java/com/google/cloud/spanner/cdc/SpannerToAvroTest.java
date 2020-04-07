@@ -34,6 +34,7 @@ import com.google.cloud.spanner.Type.StructField;
 import com.google.cloud.spanner.cdc.SpannerToAvro.SchemaSet;
 import com.google.protobuf.ByteString;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
 import org.apache.avro.Schema;
@@ -42,6 +43,7 @@ import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.util.Utf8;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -569,7 +571,7 @@ public class SpannerToAvroTest {
             .set("C12")
             .to((Date) null)
             .set("C13")
-            .to(Timestamp.now())
+            .to(Timestamp.parseTimestamp("2020-03-31T21:21:15.120Z"))
             .set("C14")
             .to((Timestamp) null)
             // ARRAY types
@@ -605,7 +607,11 @@ public class SpannerToAvroTest {
             .toDateArray(null)
             .set("C27")
             .toTimestampArray(
-                Arrays.asList(Timestamp.now(), null, Timestamp.ofTimeSecondsAndNanos(0, 0), null))
+                Arrays.asList(
+                    Timestamp.parseTimestamp("2020-03-31T21:21:15.120Z"),
+                    null,
+                    Timestamp.ofTimeSecondsAndNanos(0, 0),
+                    null))
             .set("C28")
             .toTimestampArray(null)
             .build();
@@ -622,6 +628,45 @@ public class SpannerToAvroTest {
     GenericRecord record = reader.read(null, decoder);
     assertThat(record).isNotNull();
     assertThat(record.get("C1")).isEqualTo(1L);
+    assertThat(record.get("C2")).isNull();
+    assertThat(record.get("C3")).isEqualTo(true);
+    assertThat(record.get("C4")).isNull();
+    assertThat(record.get("C5")).isEqualTo(ByteBuffer.wrap("TEST".getBytes()));
+    assertThat(record.get("C6")).isNull();
+    assertThat(record.get("C7")).isEqualTo(new Utf8("TEST"));
+    assertThat(record.get("C8")).isNull();
+    assertThat(record.get("C9")).isEqualTo(3.14D);
+    assertThat(record.get("C10")).isNull();
+    assertThat(record.get("C11")).isEqualTo(new Utf8("2020-03-31"));
+    assertThat(record.get("C12")).isNull();
+    assertThat(record.get("C13")).isEqualTo(new Utf8("2020-03-31T21:21:15.120000000Z"));
+    assertThat(record.get("C14")).isNull();
+    // ARRAY types
+    assertThat(record.get("C15")).isEqualTo(Arrays.asList(1L, null, 3L, null, 5L));
+    assertThat(record.get("C16")).isNull();
+    assertThat(record.get("C17")).isEqualTo(Arrays.asList(true, null, false, null));
+    assertThat(record.get("C18")).isNull();
+    assertThat(record.get("C19"))
+        .isEqualTo(
+            Arrays.asList(
+                ByteBuffer.wrap("TEST".getBytes()), null, ByteBuffer.wrap("FOO".getBytes()), null));
+    assertThat(record.get("C20")).isNull();
+    assertThat(record.get("C21"))
+        .isEqualTo(Arrays.asList(new Utf8("TEST"), null, new Utf8("FOO"), null));
+    assertThat(record.get("C22")).isNull();
+    assertThat(record.get("C23")).isEqualTo(Arrays.asList(3.14D, null, 6.626D, null));
+    assertThat(record.get("C24")).isNull();
+    assertThat(record.get("C25"))
+        .isEqualTo(Arrays.asList(new Utf8("2020-03-31"), null, new Utf8("1970-01-01"), null));
+    assertThat(record.get("C26")).isNull();
+    assertThat(record.get("C27"))
+        .isEqualTo(
+            Arrays.asList(
+                new Utf8("2020-03-31T21:21:15.120000000Z"),
+                null,
+                new Utf8("1970-01-01T00:00:00Z"),
+                null));
+    assertThat(record.get("C28")).isNull();
   }
 
   private ResultSet createTimestampColumnResultSet() {

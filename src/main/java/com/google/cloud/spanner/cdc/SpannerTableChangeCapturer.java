@@ -17,6 +17,7 @@
 package com.google.cloud.spanner.cdc;
 
 import com.google.api.core.ApiFuture;
+import com.google.cloud.Timestamp;
 import com.google.cloud.spanner.DatabaseClient;
 import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.StructReader;
@@ -39,7 +40,7 @@ public interface SpannerTableChangeCapturer {
   /** Interface for receiving asynchronous callbacks when a row has been inserted or updated. */
   public static interface RowChangeCallback {
     /** Called once for each detected insert or update of a row. */
-    void rowChange(String table, Row row);
+    void rowChange(String table, Row row, Timestamp commitTimestamp);
   }
 
   /**

@@ -18,6 +18,7 @@ package com.google.cloud.spanner.cdc;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import com.google.cloud.Timestamp;
 import com.google.cloud.spanner.DatabaseClient;
 import com.google.cloud.spanner.DatabaseId;
 import com.google.cloud.spanner.cdc.SpannerTableChangeCapturer.Row;
@@ -44,7 +45,7 @@ public class SpannerTableTailerTest extends AbstractMockServerTest {
     tailer.start(
         new RowChangeCallback() {
           @Override
-          public void rowChange(String table, Row row) {
+          public void rowChange(String table, Row row, Timestamp commitTimestamp) {
             latch.countDown();
             receivedRows.incrementAndGet();
           }

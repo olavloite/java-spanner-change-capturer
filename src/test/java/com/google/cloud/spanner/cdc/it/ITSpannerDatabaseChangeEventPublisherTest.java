@@ -63,8 +63,7 @@ public class ITSpannerDatabaseChangeEventPublisherTest {
   private static SubscriptionAdminClient subAdminClient;
   private static Database database;
   private static Subscriber[] subscribers;
-  private static List<PubsubMessage> receivedMessages =
-      Collections.synchronizedList(new ArrayList<>());
+  private static List<List<PubsubMessage>> receivedMessages;
   private static CountDownLatch receivedMessagesCount = new CountDownLatch(0);
 
   @BeforeClass
@@ -101,9 +100,12 @@ public class ITSpannerDatabaseChangeEventPublisherTest {
                     FixedCredentialsProvider.create(ITConfig.getPubSubCredentials()))
                 .build());
 
+    receivedMessages = new ArrayList<>(tables.length);
     subscribers = new Subscriber[tables.length];
     int i = 0;
     for (String table : tables) {
+      receivedMessages.add(Collections.synchronizedList(new ArrayList<PubsubMessage>()));
+
       topicAdminClient.createTopic(
           String.format("projects/%s/topics/spanner-update-%s", ITConfig.PUBSUB_PROJECT_ID, table));
       logger.info(String.format("Created topic for table %s", table));
@@ -116,6 +118,7 @@ public class ITSpannerDatabaseChangeEventPublisherTest {
           10);
       logger.info(String.format("Created subscription spanner-update-%s", table));
 
+      final int index = i;
       subscribers[i] =
           Subscriber.newBuilder(
                   String.format(
@@ -125,7 +128,7 @@ public class ITSpannerDatabaseChangeEventPublisherTest {
                     @Override
                     public void receiveMessage(PubsubMessage message, AckReplyConsumer consumer) {
                       logger.info(String.format("Received message %s", message.toString()));
-                      receivedMessages.add(message);
+                      receivedMessages.get(index).add(message);
                       receivedMessagesCount.countDown();
                       consumer.ack();
                     }
@@ -211,7 +214,8 @@ public class ITSpannerDatabaseChangeEventPublisherTest {
                 .to(Value.COMMIT_TIMESTAMP)
                 .build()));
     receivedMessagesCount.await(10L, TimeUnit.SECONDS);
-    assertThat(receivedMessages).hasSize(4);
+    assertThat(receivedMessages.get(0)).hasSize(2);
+    assertThat(receivedMessages.get(1)).hasSize(2);
     eventPublisher.stop();
   }
 }

@@ -18,6 +18,8 @@ package com.google.cloud.spanner.cdc;
 
 import com.google.auth.Credentials;
 import com.google.auth.oauth2.GoogleCredentials;
+import com.google.cloud.pubsub.v1.stub.PublisherStubSettings;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import java.io.IOException;
@@ -41,6 +43,8 @@ public class SpannerDatabaseChangeEventPublisher {
     private final SpannerDatabaseChangeCapturer capturer;
     private String topicNameFormat;
     private Credentials credentials;
+    private String endpoint = PublisherStubSettings.getDefaultEndpoint();
+    private boolean usePlainText;
 
     private Builder(SpannerDatabaseChangeCapturer capturer) {
       this.capturer = capturer;
@@ -53,6 +57,18 @@ public class SpannerDatabaseChangeEventPublisher {
      */
     public Builder setTopicNameFormat(String topicNameFormat) {
       this.topicNameFormat = Preconditions.checkNotNull(topicNameFormat);
+      return this;
+    }
+
+    @VisibleForTesting
+    Builder setEndpoint(String endpoint) {
+      this.endpoint = Preconditions.checkNotNull(endpoint);
+      return this;
+    }
+
+    @VisibleForTesting
+    Builder usePlainText() {
+      this.usePlainText = true;
       return this;
     }
 
@@ -83,11 +99,17 @@ public class SpannerDatabaseChangeEventPublisher {
     this.capturer = builder.capturer;
     this.publishers = new ArrayList<>(capturer.getTables().size());
     for (String table : capturer.getTables()) {
-      publishers.add(
+      SpannerTableChangeEventPublisher.Builder publisherBuilder =
           SpannerTableChangeEventPublisher.newBuilder(capturer.getCapturer(table))
-              .setCredentials(builder.credentials)
               .setTopicName(builder.topicNameFormat.replace("%table%", table))
-              .build());
+              .setEndpoint(builder.endpoint);
+      if (builder.credentials != null) {
+        publisherBuilder.setCredentials(builder.credentials);
+      }
+      if (builder.usePlainText) {
+        publisherBuilder.usePlainText();
+      }
+      publishers.add(publisherBuilder.build());
     }
   }
 

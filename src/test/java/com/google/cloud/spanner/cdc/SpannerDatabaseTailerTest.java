@@ -18,6 +18,7 @@ package com.google.cloud.spanner.cdc;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import com.google.cloud.Timestamp;
 import com.google.cloud.spanner.DatabaseClient;
 import com.google.cloud.spanner.DatabaseId;
 import com.google.cloud.spanner.cdc.SpannerTableChangeCapturer.Row;
@@ -35,23 +36,28 @@ public class SpannerDatabaseTailerTest extends AbstractMockServerTest {
   @Test
   public void testReceiveChanges() throws Exception {
     DatabaseClient client = spanner.getDatabaseClient(DatabaseId.of("p", "i", "d"));
-    SpannerDatabaseTailer tailer =
-        SpannerDatabaseTailer.newBuilder(client)
-            .setAllTables()
-            .setPollInterval(Duration.ofSeconds(100L))
-            .build();
-    final AtomicInteger receivedRows = new AtomicInteger();
-    CountDownLatch latch = new CountDownLatch(SELECT_FOO_ROW_COUNT + SELECT_BAR_ROW_COUNT);
-    tailer.start(
-        new RowChangeCallback() {
-          @Override
-          public void rowChange(String table, Row row) {
-            latch.countDown();
-            receivedRows.incrementAndGet();
-          }
-        });
-    latch.await(5L, TimeUnit.SECONDS);
-    tailer.stopAsync().get();
-    assertThat(receivedRows.get()).isEqualTo(SELECT_FOO_ROW_COUNT + SELECT_BAR_ROW_COUNT);
+    try {
+      SpannerDatabaseTailer tailer =
+          SpannerDatabaseTailer.newBuilder(client)
+              .setAllTables()
+              .setPollInterval(Duration.ofSeconds(100L))
+              .build();
+      final AtomicInteger receivedRows = new AtomicInteger();
+      final CountDownLatch latch = new CountDownLatch(SELECT_FOO_ROW_COUNT + SELECT_BAR_ROW_COUNT);
+      tailer.start(
+          new RowChangeCallback() {
+            @Override
+            public void rowChange(String table, Row row, Timestamp commitTimestamp) {
+              latch.countDown();
+              receivedRows.incrementAndGet();
+            }
+          });
+      latch.await(5L, TimeUnit.SECONDS);
+      tailer.stopAsync().get();
+      assertThat(receivedRows.get()).isEqualTo(SELECT_FOO_ROW_COUNT + SELECT_BAR_ROW_COUNT);
+    } catch (Throwable t) {
+      t.printStackTrace();
+      throw t;
+    }
   }
 }

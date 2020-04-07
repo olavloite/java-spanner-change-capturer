@@ -95,7 +95,7 @@ public class ITSpannerDatabaseTailerTest {
     tailer.start(
         new RowChangeCallback() {
           @Override
-          public void rowChange(String table, Row row) {
+          public void rowChange(String table, Row row, Timestamp commitTimestamp) {
             logger.info(
                 String.format(
                     "Received changed for table %s: %s", table, row.asStruct().toString()));

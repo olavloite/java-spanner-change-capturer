@@ -27,7 +27,6 @@ import com.google.cloud.spanner.Statement;
 import com.google.common.base.Preconditions;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -98,7 +97,6 @@ public class SpannerTableTailer implements SpannerTableChangeCapturer {
   private RowChangeCallback callback;
   private String commitTimestampColumn;
   private Statement.Builder statement;
-  private ScheduledFuture<?> pollFuture;
 
   private SpannerTableTailer(Builder builder) {
     this.client = builder.client;
@@ -132,7 +130,7 @@ public class SpannerTableTailer implements SpannerTableChangeCapturer {
             String.format(
                 "SELECT * FROM `%s` WHERE `%s`>@prevCommitTimestamp ORDER BY `%s`",
                 table, commitTimestampColumn, commitTimestampColumn));
-    pollFuture = executor.schedule(new SpannerTailerRunner(), 0L, TimeUnit.MILLISECONDS);
+    executor.schedule(new SpannerTailerRunner(), 0L, TimeUnit.MILLISECONDS);
   }
 
   @Override
@@ -161,9 +159,8 @@ public class SpannerTableTailer implements SpannerTableChangeCapturer {
       }
       synchronized (lock) {
         if (stopFuture == null) {
-          pollFuture =
-              executor.schedule(
-                  new SpannerTailerRunner(), pollInterval.toMillis(), TimeUnit.MILLISECONDS);
+          executor.schedule(
+              new SpannerTailerRunner(), pollInterval.toMillis(), TimeUnit.MILLISECONDS);
         } else {
           stopFuture.set(null);
         }
@@ -187,13 +184,12 @@ public class SpannerTableTailer implements SpannerTableChangeCapturer {
             case NOT_READY:
               return CallbackResponse.CONTINUE;
             case OK:
-              delegate.rowChange(table, new RowImpl(resultSet));
-              if (!resultSet.isNull(commitTimestampColumn)) {
-                lastSeenCommitTimestamp = resultSet.getTimestamp(commitTimestampColumn);
-                logger.log(
-                    Level.FINE,
-                    String.format("Saw commit timestamp %s", lastSeenCommitTimestamp.toString()));
-              }
+              Timestamp ts = resultSet.getTimestamp(commitTimestampColumn);
+              delegate.rowChange(table, new RowImpl(resultSet), ts);
+              lastSeenCommitTimestamp = ts;
+              logger.log(
+                  Level.FINE,
+                  String.format("Saw commit timestamp %s", lastSeenCommitTimestamp.toString()));
               break;
           }
         }

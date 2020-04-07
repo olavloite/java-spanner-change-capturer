@@ -27,6 +27,7 @@ import com.google.api.gax.rpc.FixedTransportChannelProvider;
 import com.google.api.gax.rpc.TransportChannelProvider;
 import com.google.auth.Credentials;
 import com.google.auth.oauth2.GoogleCredentials;
+import com.google.cloud.Timestamp;
 import com.google.cloud.pubsub.v1.Publisher;
 import com.google.cloud.pubsub.v1.stub.PublisherStubSettings;
 import com.google.cloud.spanner.cdc.SpannerTableChangeCapturer.Row;
@@ -52,9 +53,21 @@ public class SpannerTableChangeEventPublisher {
   private static final Logger logger =
       Logger.getLogger(SpannerTableChangeEventPublisher.class.getName());
 
+  /** Interface for getting a callback when a message is published to PubSub. */
+  public static interface PublishListener {
+    /** Called when a change is successfully published to PubSub. */
+    void onPublished(String table, Timestamp commitTimestamp, String messageId);
+  }
+
+  private static final class NoOpListener implements PublishListener {
+    @Override
+    public void onPublished(String table, Timestamp commitTimestamp, String messageId) {}
+  }
+
   public static class Builder {
     private final SpannerTableChangeCapturer capturer;
     private Publisher publisher;
+    private PublishListener listener = new NoOpListener();
     private String topicName;
     private Credentials credentials;
     private String endpoint = PublisherStubSettings.getDefaultEndpoint();
@@ -62,6 +75,11 @@ public class SpannerTableChangeEventPublisher {
 
     private Builder(SpannerTableChangeCapturer capturer) {
       this.capturer = capturer;
+    }
+
+    public Builder setListener(PublishListener publishListener) {
+      this.listener = Preconditions.checkNotNull(publishListener);
+      return this;
     }
 
     /** Sets the name of the topic where the events should be published. */
@@ -126,6 +144,7 @@ public class SpannerTableChangeEventPublisher {
   private boolean started = false;
   private boolean stopped = false;
   private final Publisher publisher;
+  private final PublishListener listener;
   private final SpannerTableChangeCapturer capturer;
   private final SpannerToAvro converter;
 
@@ -156,6 +175,7 @@ public class SpannerTableChangeEventPublisher {
       }
       this.publisher = publisherBuilder.build();
     }
+    this.listener = builder.listener;
     this.capturer = builder.capturer;
     this.converter = new SpannerToAvro(capturer.getDatabaseClient(), capturer.getTable());
   }
@@ -167,20 +187,25 @@ public class SpannerTableChangeEventPublisher {
     capturer.start(
         new RowChangeCallback() {
           @Override
-          public void rowChange(String table, Row row) {
+          public void rowChange(final String table, Row row, final Timestamp commitTimestamp) {
             // Only use resources to convert the row to a string if we are actually going to log it.
             final String rowString =
                 logger.isLoggable(Level.FINE) ? row.asStruct().toString() : null;
             logger.log(Level.FINE, "Publishing change to row {0}", rowString);
             ApiFuture<String> result =
                 publisher.publish(
-                    PubsubMessage.newBuilder().setData(converter.makeRecord(row)).build());
+                    PubsubMessage.newBuilder()
+                        .setData(converter.makeRecord(row))
+                        .putAttributes("Table", table)
+                        .putAttributes("Timestamp", commitTimestamp.toString())
+                        .build());
             ApiFutures.addCallback(
                 result,
                 new ApiFutureCallback<String>() {
                   @Override
-                  public void onSuccess(String result) {
+                  public void onSuccess(String messageId) {
                     logger.log(Level.FINE, "Successfully published change to row {0}", rowString);
+                    listener.onPublished(table, commitTimestamp, messageId);
                   }
 
                   @Override
