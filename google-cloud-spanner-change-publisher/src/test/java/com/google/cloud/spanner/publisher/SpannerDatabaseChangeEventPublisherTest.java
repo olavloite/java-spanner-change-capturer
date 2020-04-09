@@ -23,11 +23,12 @@ import com.google.api.gax.core.NoCredentialsProvider;
 import com.google.api.gax.grpc.GrpcTransportChannel;
 import com.google.api.gax.rpc.FixedTransportChannelProvider;
 import com.google.api.gax.rpc.TransportChannelProvider;
+import com.google.cloud.Timestamp;
 import com.google.cloud.pubsub.v1.AckReplyConsumer;
 import com.google.cloud.pubsub.v1.MessageReceiver;
 import com.google.cloud.pubsub.v1.Subscriber;
-import com.google.cloud.spanner.DatabaseClient;
 import com.google.cloud.spanner.DatabaseId;
+import com.google.cloud.spanner.poller.SpannerCommitTimestampRepository;
 import com.google.cloud.spanner.poller.SpannerDatabaseTailer;
 import com.google.cloud.spanner.publisher.MockPubSubServer.MockPublisherServiceImpl;
 import com.google.cloud.spanner.publisher.MockPubSubServer.MockSubscriberServiceImpl;
@@ -85,8 +86,6 @@ public class SpannerDatabaseChangeEventPublisherTest extends AbstractMockServerT
 
   @Test
   public void testPublishChanges() throws Exception {
-    DatabaseClient client = spanner.getDatabaseClient(DatabaseId.of("p", "i", "d"));
-
     final AtomicInteger receivedMessages = new AtomicInteger();
     final CountDownLatch latch = new CountDownLatch(SELECT_FOO_ROW_COUNT + SELECT_BAR_ROW_COUNT);
 
@@ -113,10 +112,15 @@ public class SpannerDatabaseChangeEventPublisherTest extends AbstractMockServerT
             .build();
     subscriber.startAsync().awaitRunning();
 
+    DatabaseId db = DatabaseId.of("p", "i", "d");
     SpannerDatabaseTailer tailer =
-        SpannerDatabaseTailer.newBuilder(client)
+        SpannerDatabaseTailer.newBuilder(spanner, db)
             .setAllTables()
             .setPollInterval(Duration.ofSeconds(100L))
+            .setCommitTimestampRepository(
+                SpannerCommitTimestampRepository.newBuilder(spanner, db)
+                    .setInitialCommitTimestamp(Timestamp.MIN_VALUE)
+                    .build())
             .build();
     SpannerDatabaseChangeEventPublisher publisher =
         SpannerDatabaseChangeEventPublisher.newBuilder(tailer)

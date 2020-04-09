@@ -40,6 +40,9 @@ func Test_Archiver(t *testing.T) {
 		PublishTime:     time.Now(),
 		Attributes: map[string]string{
 			"Timestamp": "2020-04-05T21:23:59.199818000Z",
+			"Database": "projects/test-project/instances/test-instance/databases/music",
+			"Catalog": "",
+			"Schema": "",
 			"Table": "Singers",
 		},
 	}
@@ -49,7 +52,7 @@ func Test_Archiver(t *testing.T) {
 		if g, w := bucketName, "cdc-test-bucket"; g != w {
 			return fmt.Errorf("bucket name mismatch\nGot: %s\nWant: %s", g, w)
 		}
-		if g, w := fileName, "Singers#2020-04-05T21:23:59.199818000Z#9999"; g != w {
+		if g, w := fileName, "projects/test-project/instances/test-instance/databases/music/Singers-2020-04-05T21:23:59.199818000Z-9999"; g != w {
 			return fmt.Errorf("file name mismatch\nGot: %s\nWant: %s", g, w)
 		}
 		if g, w := string(msg.Data), "some data"; g != w {
@@ -57,6 +60,18 @@ func Test_Archiver(t *testing.T) {
 		}
 		if g, w := writer.ContentType, "protobuf/bytes"; g != w {
 			return fmt.Errorf("content type mismatch\nGot: %s\nWant: %s", g, w)
+		}
+		if g, w := writer.Metadata["Database"], "projects/test-project/instances/test-instance/databases/music"; g != w {
+			return fmt.Errorf("metadata database mismatch\nGot: %s\nWant: %s", g, w)
+		}
+		if g, w := writer.Metadata["Catalog"], ""; g != w {
+			return fmt.Errorf("metadata catalog mismatch\nGot: %s\nWant: %s", g, w)
+		}
+		if g, w := writer.Metadata["Schema"], ""; g != w {
+			return fmt.Errorf("metadata schema mismatch\nGot: %s\nWant: %s", g, w)
+		}
+		if g, w := writer.Metadata["Table"], "Singers"; g != w {
+			return fmt.Errorf("metadata table mismatch\nGot: %s\nWant: %s", g, w)
 		}
 		if g, w := writer.Metadata["Timestamp"], "2020-04-05T21:23:59.199818000Z"; g != w {
 			return fmt.Errorf("metadata timestamp mismatch\nGot: %s\nWant: %s", g, w)

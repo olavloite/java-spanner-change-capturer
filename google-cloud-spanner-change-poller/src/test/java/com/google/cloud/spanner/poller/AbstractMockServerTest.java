@@ -49,16 +49,28 @@ public abstract class AbstractMockServerTest {
   // Statements for SpannerCommitTimestampRepository
   private static final Statement FIND_LAST_SEEN_COMMIT_TIMESTAMPS_TABLE_STATEMENT =
       Statement.newBuilder(SpannerCommitTimestampRepository.FIND_TABLE_STATEMENT)
+          .bind("catalog")
+          .to(SpannerCommitTimestampRepository.DEFAULT_TABLE_CATALOG)
+          .bind("schema")
+          .to(SpannerCommitTimestampRepository.DEFAULT_TABLE_SCHEMA)
           .bind("table")
           .to(SpannerCommitTimestampRepository.DEFAULT_TABLE_NAME)
           .build();
   private static final Statement FIND_LAST_SEEN_COMMIT_TIMESTAMPS_COLUMNS_STATEMENT =
       Statement.newBuilder(SpannerCommitTimestampRepository.FIND_COLUMNS_STATEMENT)
+          .bind("catalog")
+          .to(SpannerCommitTimestampRepository.DEFAULT_TABLE_CATALOG)
+          .bind("schema")
+          .to(SpannerCommitTimestampRepository.DEFAULT_TABLE_SCHEMA)
           .bind("table")
           .to(SpannerCommitTimestampRepository.DEFAULT_TABLE_NAME)
           .build();
   private static final Statement FIND_LAST_SEEN_COMMIT_TIMESTAMPS_PK_STATEMENT =
       Statement.newBuilder(SpannerCommitTimestampRepository.FIND_PK_COLUMNS_STATEMENT)
+          .bind("catalog")
+          .to(SpannerCommitTimestampRepository.DEFAULT_TABLE_CATALOG)
+          .bind("schema")
+          .to(SpannerCommitTimestampRepository.DEFAULT_TABLE_SCHEMA)
           .bind("table")
           .to(SpannerCommitTimestampRepository.DEFAULT_TABLE_NAME)
           .build();
@@ -115,6 +127,35 @@ public abstract class AbstractMockServerTest {
                       .addValues(
                           Value.newBuilder()
                               .setStringValue(
+                                  SpannerCommitTimestampRepository
+                                      .DEFAULT_DATABASE_NAME_COLUMN_NAME)
+                              .build())
+                      .addValues(Value.newBuilder().setStringValue("STRING(MAX)").build())
+                      .build())
+              .addRows(
+                  ListValue.newBuilder()
+                      .addValues(
+                          Value.newBuilder()
+                              .setStringValue(
+                                  SpannerCommitTimestampRepository
+                                      .DEFAULT_TABLE_CATALOG_COLUMN_NAME)
+                              .build())
+                      .addValues(Value.newBuilder().setStringValue("STRING(MAX)").build())
+                      .build())
+              .addRows(
+                  ListValue.newBuilder()
+                      .addValues(
+                          Value.newBuilder()
+                              .setStringValue(
+                                  SpannerCommitTimestampRepository.DEFAULT_TABLE_SCHEMA_COLUMN_NAME)
+                              .build())
+                      .addValues(Value.newBuilder().setStringValue("STRING(MAX)").build())
+                      .build())
+              .addRows(
+                  ListValue.newBuilder()
+                      .addValues(
+                          Value.newBuilder()
+                              .setStringValue(
                                   SpannerCommitTimestampRepository.DEFAULT_TABLE_NAME_COLUMN_NAME)
                               .build())
                       .addValues(Value.newBuilder().setStringValue("STRING(MAX)").build())
@@ -144,6 +185,30 @@ public abstract class AbstractMockServerTest {
           .build();
   private static final com.google.spanner.v1.ResultSet FIND_LAST_SEEN_COMMIT_TIMESTAMPS_PK_RESULTS =
       com.google.spanner.v1.ResultSet.newBuilder()
+          .addRows(
+              ListValue.newBuilder()
+                  .addValues(
+                      Value.newBuilder()
+                          .setStringValue(
+                              SpannerCommitTimestampRepository.DEFAULT_DATABASE_NAME_COLUMN_NAME)
+                          .build())
+                  .build())
+          .addRows(
+              ListValue.newBuilder()
+                  .addValues(
+                      Value.newBuilder()
+                          .setStringValue(
+                              SpannerCommitTimestampRepository.DEFAULT_TABLE_CATALOG_COLUMN_NAME)
+                          .build())
+                  .build())
+          .addRows(
+              ListValue.newBuilder()
+                  .addValues(
+                      Value.newBuilder()
+                          .setStringValue(
+                              SpannerCommitTimestampRepository.DEFAULT_TABLE_SCHEMA_COLUMN_NAME)
+                          .build())
+                  .build())
           .addRows(
               ListValue.newBuilder()
                   .addValues(
@@ -233,14 +298,18 @@ public abstract class AbstractMockServerTest {
   // Poll Foo statements.
   private static final Statement COLUMN_OPTIONS_FOO_STATEMENT =
       Statement.newBuilder(SpannerUtils.FIND_COMMIT_TIMESTAMP_COLUMN_QUERY)
+          .bind("catalog")
+          .to("")
+          .bind("schema")
+          .to("")
           .bind("table")
           .to("Foo")
           .build();
   public static final Statement SELECT_FOO_STATEMENT =
       Statement.newBuilder(
-              String.format(SpannerTableTailer.POLL_QUERY, "Foo", "LastModified", "LastModified"))
+              String.format(SpannerTableTailer.POLL_QUERY, "`Foo`", "LastModified", "LastModified"))
           .bind("prevCommitTimestamp")
-          .to(Timestamp.parseTimestamp("0001-01-01T00:00:00Z"))
+          .to(Timestamp.MIN_VALUE)
           .build();
   public static final int SELECT_BAR_ROW_COUNT = 20;
   private static final com.google.spanner.v1.ResultSet COLUMNS_OPTIONS_FOO_RESULT =
@@ -257,14 +326,18 @@ public abstract class AbstractMockServerTest {
   // Poll Bar statements.
   private static final Statement COLUMN_OPTIONS_BAR_STATEMENT =
       Statement.newBuilder(SpannerUtils.FIND_COMMIT_TIMESTAMP_COLUMN_QUERY)
+          .bind("catalog")
+          .to("")
+          .bind("schema")
+          .to("")
           .bind("table")
           .to("Bar")
           .build();
   public static final Statement SELECT_BAR_STATEMENT =
       Statement.newBuilder(
-              "SELECT * FROM `Bar` WHERE `LastModified`>@prevCommitTimestamp ORDER BY `LastModified`")
+              String.format(SpannerTableTailer.POLL_QUERY, "`Bar`", "LastModified", "LastModified"))
           .bind("prevCommitTimestamp")
-          .to(Timestamp.parseTimestamp("0001-01-01T00:00:00Z"))
+          .to(Timestamp.MIN_VALUE)
           .build();
   public static final int SELECT_FOO_ROW_COUNT = 10;
   private static final com.google.spanner.v1.ResultSet COLUMNS_OPTIONS_BAR_RESULT =
@@ -324,8 +397,7 @@ public abstract class AbstractMockServerTest {
             .build();
     mockSpanner.putStatementResults(
         StatementResult.query(SELECT_FOO_STATEMENT, fooResults),
-        StatementResult.query(
-            nextFooPollStatement, new RandomResultSetGenerator(SELECT_FOO_ROW_COUNT).generate()));
+        StatementResult.query(nextFooPollStatement, new RandomResultSetGenerator(0).generate()));
     // Poll Bar results.
     mockSpanner.putStatementResult(
         StatementResult.query(COLUMN_OPTIONS_BAR_STATEMENT, COLUMNS_OPTIONS_BAR_RESULT));

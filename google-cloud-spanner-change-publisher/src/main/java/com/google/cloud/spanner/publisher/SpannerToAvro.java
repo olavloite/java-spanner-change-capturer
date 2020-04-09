@@ -24,6 +24,7 @@ import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.StructReader;
 import com.google.cloud.spanner.Type;
 import com.google.cloud.spanner.poller.SpannerUtils;
+import com.google.cloud.spanner.poller.TableId;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.collect.Collections2;
@@ -55,17 +56,30 @@ class SpannerToAvro {
   private static final Logger logger = Logger.getLogger(SpannerToAvro.class.getName());
   private static final ByteBufAllocator alloc = PooledByteBufAllocator.DEFAULT;
   static final String SCHEMA_QUERY =
-      "SELECT COLUMN_NAME, SPANNER_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=@table ORDER BY ORDINAL_POSITION";
+      "SELECT COLUMN_NAME, SPANNER_TYPE, IS_NULLABLE\n"
+          + "FROM INFORMATION_SCHEMA.COLUMNS\n"
+          + "WHERE TABLE_CATALOG = @catalog\n"
+          + "AND TABLE_SCHEMA = @schema\n"
+          + "AND TABLE_NAME = @table\n"
+          + "ORDER BY ORDINAL_POSITION";
 
   private final DatabaseClient client;
-  private final String table;
+  private final TableId table;
   private final Statement statement;
   private final SchemaSet schemaSet;
 
-  SpannerToAvro(DatabaseClient client, String table) {
+  SpannerToAvro(DatabaseClient client, TableId table) {
     this.client = client;
     this.table = table;
-    this.statement = Statement.newBuilder(SCHEMA_QUERY).bind("table").to(table).build();
+    this.statement =
+        Statement.newBuilder(SCHEMA_QUERY)
+            .bind("catalog")
+            .to(table.getCatalog())
+            .bind("schema")
+            .to(table.getSchema())
+            .bind("table")
+            .to(table.getTable())
+            .build();
     this.schemaSet = createSchemaSet();
   }
 
@@ -78,10 +92,10 @@ class SpannerToAvro {
 
   @VisibleForTesting
   static SchemaSet convertTableToSchemaSet(
-      String tableName, String avroNamespace, ResultSet resultSet, String tsColName) {
+      TableId table, String avroNamespace, ResultSet resultSet, String tsColName) {
     final LinkedHashMap<String, String> spannerSchema = Maps.newLinkedHashMap();
     final SchemaBuilder.FieldAssembler<Schema> avroSchemaBuilder =
-        SchemaBuilder.record(tableName).namespace(avroNamespace).fields();
+        SchemaBuilder.record(table.getTable()).namespace(avroNamespace).fields();
     while (resultSet.next()) {
       final Struct currentRow = resultSet.getCurrentRowAsStruct();
       final String name = currentRow.getString(0);

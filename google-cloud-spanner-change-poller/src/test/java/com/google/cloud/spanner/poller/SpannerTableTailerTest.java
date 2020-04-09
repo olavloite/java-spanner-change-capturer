@@ -19,12 +19,12 @@ package com.google.cloud.spanner.poller;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.google.cloud.Timestamp;
-import com.google.cloud.spanner.DatabaseClient;
 import com.google.cloud.spanner.DatabaseId;
 import com.google.cloud.spanner.MockSpannerServiceImpl.StatementResult;
 import com.google.cloud.spanner.Statement;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer.Row;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer.RowChangeCallback;
+import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -37,17 +37,21 @@ import org.threeten.bp.Duration;
 public class SpannerTableTailerTest extends AbstractMockServerTest {
   @Test
   public void testReceiveChanges() throws Exception {
-    DatabaseClient client = spanner.getDatabaseClient(DatabaseId.of("p", "i", "d"));
+    DatabaseId db = DatabaseId.of("p", "i", "d");
     SpannerTableTailer tailer =
-        SpannerTableTailer.newBuilder(client, "Foo")
+        SpannerTableTailer.newBuilder(spanner, TableId.of(db, "Foo"))
             .setPollInterval(Duration.ofSeconds(100L))
+            .setCommitTimestampRepository(
+                SpannerCommitTimestampRepository.newBuilder(spanner, db)
+                    .setInitialCommitTimestamp(Timestamp.MIN_VALUE)
+                    .build())
             .build();
     final AtomicInteger receivedRows = new AtomicInteger();
     final CountDownLatch latch = new CountDownLatch(SELECT_FOO_ROW_COUNT);
     tailer.start(
         new RowChangeCallback() {
           @Override
-          public void rowChange(String table, Row row, Timestamp commitTimestamp) {
+          public void rowChange(TableId table, Row row, Timestamp commitTimestamp) {
             receivedRows.incrementAndGet();
             latch.countDown();
           }
@@ -57,56 +61,84 @@ public class SpannerTableTailerTest extends AbstractMockServerTest {
     assertThat(receivedRows.get()).isEqualTo(SELECT_FOO_ROW_COUNT);
   }
 
+  private static final class TestChangeCallback implements RowChangeCallback {
+    private final AtomicInteger receivedRows = new AtomicInteger();
+    private CountDownLatch latch;
+    private Timestamp lastSeenCommitTimestamp = Timestamp.MIN_VALUE;
+
+    private TestChangeCallback(int initialCountDown) {
+      latch = new CountDownLatch(initialCountDown);
+    }
+
+    private void setCountDown(int count) {
+      latch = new CountDownLatch(count);
+    }
+
+    private CountDownLatch getLatch() {
+      return latch;
+    }
+
+    @Override
+    public void rowChange(TableId table, Row row, Timestamp commitTimestamp) {
+      if (commitTimestamp.compareTo(lastSeenCommitTimestamp) > 0) {
+        lastSeenCommitTimestamp = commitTimestamp;
+      }
+      receivedRows.incrementAndGet();
+      latch.countDown();
+    }
+  }
+
   @Test
   public void testStressReceiveMultipleChanges() throws Exception {
-    for (int i = 0; i < 1000; i++) {
-      DatabaseClient client = spanner.getDatabaseClient(DatabaseId.of("p", "i", "d"));
+    final Random random = new Random();
+    for (int i = 0; i < 100; i++) {
+      DatabaseId db = DatabaseId.of("p", "i", "d");
       SpannerTableTailer tailer =
-          SpannerTableTailer.newBuilder(client, "Foo")
+          SpannerTableTailer.newBuilder(spanner, TableId.of(db, "Foo"))
               .setPollInterval(Duration.ofMillis(1L))
+              .setCommitTimestampRepository(
+                  SpannerCommitTimestampRepository.newBuilder(spanner, db)
+                      .setInitialCommitTimestamp(Timestamp.MIN_VALUE)
+                      .build())
               .build();
-      final AtomicInteger receivedRows = new AtomicInteger();
-      final CountDownLatch latch = new CountDownLatch(SELECT_FOO_ROW_COUNT);
-      final int secondPollRowCount = 5;
-      final CountDownLatch secondLatch =
-          new CountDownLatch(SELECT_FOO_ROW_COUNT + secondPollRowCount);
-      tailer.start(
-          new RowChangeCallback() {
-            @Override
-            public void rowChange(String table, Row row, Timestamp commitTimestamp) {
-              receivedRows.incrementAndGet();
-              latch.countDown();
-              secondLatch.countDown();
-            }
-          });
+      TestChangeCallback callback = new TestChangeCallback(SELECT_FOO_ROW_COUNT);
+      tailer.start(callback);
+      CountDownLatch latch = callback.getLatch();
       latch.await(5L, TimeUnit.SECONDS);
-      assertThat(receivedRows.get()).isEqualTo(SELECT_FOO_ROW_COUNT);
+      assertThat(callback.receivedRows.get()).isEqualTo(SELECT_FOO_ROW_COUNT);
 
-      Timestamp lastSeenCommitTimestamp = tailer.getLastSeenCommitTimestamp();
-      Timestamp nextCommitTimestamp =
-          Timestamp.ofTimeSecondsAndNanos(
-              lastSeenCommitTimestamp.getSeconds() + 1, lastSeenCommitTimestamp.getNanos());
-      Statement pollStatement1 =
-          SELECT_FOO_STATEMENT
-              .toBuilder()
-              .bind("prevCommitTimestamp")
-              .to(lastSeenCommitTimestamp)
-              .build();
-      Statement pollStatement2 =
-          SELECT_FOO_STATEMENT
-              .toBuilder()
-              .bind("prevCommitTimestamp")
-              .to(nextCommitTimestamp)
-              .build();
-      mockSpanner.putStatementResults(
-          StatementResult.query(
-              pollStatement1,
-              new RandomResultSetGenerator(5)
-                  .generateWithFixedCommitTimestamp(nextCommitTimestamp)),
-          StatementResult.query(pollStatement2, new RandomResultSetGenerator(0).generate()));
+      int expectedTotalChangeCount = SELECT_FOO_ROW_COUNT;
+      for (int change = 0; change < 50; change++) {
+        int numChanges = random.nextInt(10) + 1;
+        expectedTotalChangeCount += numChanges;
+        callback.setCountDown(numChanges);
+        Timestamp lastSeenCommitTimestamp = callback.lastSeenCommitTimestamp;
+        Timestamp nextCommitTimestamp =
+            Timestamp.ofTimeSecondsAndNanos(
+                lastSeenCommitTimestamp.getSeconds() + 1, lastSeenCommitTimestamp.getNanos());
+        Statement pollStatement1 =
+            SELECT_FOO_STATEMENT
+                .toBuilder()
+                .bind("prevCommitTimestamp")
+                .to(lastSeenCommitTimestamp)
+                .build();
+        Statement pollStatement2 =
+            SELECT_FOO_STATEMENT
+                .toBuilder()
+                .bind("prevCommitTimestamp")
+                .to(nextCommitTimestamp)
+                .build();
+        mockSpanner.putStatementResults(
+            StatementResult.query(
+                pollStatement1,
+                new RandomResultSetGenerator(numChanges)
+                    .generateWithFixedCommitTimestamp(nextCommitTimestamp)),
+            StatementResult.query(pollStatement2, new RandomResultSetGenerator(0).generate()));
 
-      secondLatch.await(5L, TimeUnit.SECONDS);
-      assertThat(receivedRows.get()).isEqualTo(SELECT_FOO_ROW_COUNT + secondPollRowCount);
+        latch = callback.getLatch();
+        latch.await(5L, TimeUnit.SECONDS);
+        assertThat(callback.receivedRows.get()).isEqualTo(expectedTotalChangeCount);
+      }
 
       System.out.println("Finished test run " + i + ", closing tailer");
       tailer.stopAsync().get();

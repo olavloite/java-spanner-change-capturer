@@ -23,12 +23,14 @@ import com.google.api.gax.core.NoCredentialsProvider;
 import com.google.api.gax.grpc.GrpcTransportChannel;
 import com.google.api.gax.rpc.FixedTransportChannelProvider;
 import com.google.api.gax.rpc.TransportChannelProvider;
+import com.google.cloud.Timestamp;
 import com.google.cloud.pubsub.v1.AckReplyConsumer;
 import com.google.cloud.pubsub.v1.MessageReceiver;
 import com.google.cloud.pubsub.v1.Subscriber;
-import com.google.cloud.spanner.DatabaseClient;
 import com.google.cloud.spanner.DatabaseId;
+import com.google.cloud.spanner.poller.SpannerCommitTimestampRepository;
 import com.google.cloud.spanner.poller.SpannerTableTailer;
+import com.google.cloud.spanner.poller.TableId;
 import com.google.cloud.spanner.publisher.MockPubSubServer.MockPublisherServiceImpl;
 import com.google.cloud.spanner.publisher.MockPubSubServer.MockSubscriberServiceImpl;
 import com.google.pubsub.v1.PubsubMessage;
@@ -85,8 +87,6 @@ public class SpannerTableChangeEventPublisherTest extends AbstractMockServerTest
 
   @Test
   public void testPublishChanges() throws Exception {
-    DatabaseClient client = spanner.getDatabaseClient(DatabaseId.of("p", "i", "d"));
-
     final AtomicInteger receivedMessages = new AtomicInteger();
     final CountDownLatch latch = new CountDownLatch(SELECT_FOO_ROW_COUNT);
 
@@ -113,9 +113,14 @@ public class SpannerTableChangeEventPublisherTest extends AbstractMockServerTest
             .build();
     subscriber.startAsync().awaitRunning();
 
+    DatabaseId db = DatabaseId.of("p", "i", "i");
     SpannerTableTailer tailer =
-        SpannerTableTailer.newBuilder(client, "Foo")
+        SpannerTableTailer.newBuilder(spanner, TableId.of(db, "Foo"))
             .setPollInterval(Duration.ofSeconds(100L))
+            .setCommitTimestampRepository(
+                SpannerCommitTimestampRepository.newBuilder(spanner, db)
+                    .setInitialCommitTimestamp(Timestamp.MIN_VALUE)
+                    .build())
             .build();
     SpannerTableChangeEventPublisher publisher =
         SpannerTableChangeEventPublisher.newBuilder(tailer)

@@ -21,6 +21,8 @@ import com.google.api.core.ApiFunction;
 import com.google.api.core.ApiFuture;
 import com.google.api.core.ApiFutures;
 import com.google.cloud.spanner.DatabaseClient;
+import com.google.cloud.spanner.DatabaseId;
+import com.google.cloud.spanner.Spanner;
 import com.google.cloud.spanner.Statement;
 import com.google.cloud.spanner.StructReader;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer.RowChangeCallback;
@@ -45,12 +47,15 @@ public class SpannerDatabaseTailer implements SpannerDatabaseChangeCapturer {
           + "FROM INFORMATION_SCHEMA.TABLES\n"
           + "WHERE TABLE_NAME NOT IN UNNEST(@excluded)\n"
           + "AND (@allTables=TRUE OR TABLE_NAME IN UNNEST(@included))\n"
-          + "AND TABLE_SCHEMA=@schema\n"
-          + "AND TABLE_CATALOG=@catalog\n"
+          + "AND TABLE_CATALOG = @catalog\n"
+          + "AND TABLE_SCHEMA = @schema\n"
           + "AND TABLE_NAME IN (SELECT TABLE_NAME FROM INFORMATION_SCHEMA.COLUMN_OPTIONS WHERE OPTION_NAME='allow_commit_timestamp' AND OPTION_VALUE='TRUE')";
 
   public static class Builder {
-    private final DatabaseClient client;
+    private final Spanner spanner;
+    private final DatabaseId databaseId;
+    private String catalog = "";
+    private String schema = "";
     private boolean allTables = false;
     private List<String> includedTables = new ArrayList<>();
     private List<String> excludedTables = new ArrayList<>();
@@ -58,9 +63,11 @@ public class SpannerDatabaseTailer implements SpannerDatabaseChangeCapturer {
     private Duration pollInterval = Duration.ofSeconds(1L);
     private ScheduledExecutorService executor;
 
-    private Builder(DatabaseClient client) {
-      this.client = Preconditions.checkNotNull(client);
-      this.commitTimestampRepository = SpannerCommitTimestampRepository.newBuilder(client).build();
+    private Builder(Spanner spanner, DatabaseId databaseId) {
+      this.spanner = Preconditions.checkNotNull(spanner);
+      this.databaseId = Preconditions.checkNotNull(databaseId);
+      this.commitTimestampRepository =
+          SpannerCommitTimestampRepository.newBuilder(spanner, databaseId).build();
     }
 
     /**
@@ -136,25 +143,31 @@ public class SpannerDatabaseTailer implements SpannerDatabaseChangeCapturer {
   }
 
   /** Creates a builder for a {@link SpannerDatabaseTailer}. */
-  public static Builder newBuilder(DatabaseClient client) {
-    return new Builder(client);
+  public static Builder newBuilder(Spanner spanner, DatabaseId databaseId) {
+    return new Builder(spanner, databaseId);
   }
 
   private boolean started;
   private boolean stopped;
-  private final DatabaseClient client;
+  private final Spanner spanner;
+  private final DatabaseId databaseId;
+  private final String catalog;
+  private final String schema;
   private final boolean allTables;
-  private final ImmutableList<String> tables;
+  private final ImmutableList<TableId> tables;
   private final ImmutableList<String> includedTables;
   private final ImmutableList<String> excludedTables;
-  private final Map<String, SpannerTableChangeCapturer> capturers;
+  private final Map<TableId, SpannerTableChangeCapturer> capturers;
 
   private SpannerDatabaseTailer(Builder builder) {
-    this.client = builder.client;
+    this.spanner = builder.spanner;
+    this.databaseId = builder.databaseId;
+    this.catalog = builder.catalog;
+    this.schema = builder.schema;
     this.allTables = builder.allTables;
     this.includedTables = ImmutableList.copyOf(builder.includedTables);
     this.excludedTables = ImmutableList.copyOf(builder.excludedTables);
-    this.tables = allTableNames(client);
+    this.tables = allTableNames(spanner.getDatabaseClient(databaseId));
     ScheduledExecutorService executor;
     if (builder.executor == null) {
       executor = MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(tables.size()));
@@ -162,10 +175,10 @@ public class SpannerDatabaseTailer implements SpannerDatabaseChangeCapturer {
       executor = builder.executor;
     }
     capturers = new HashMap<>(tables.size());
-    for (String table : tables) {
+    for (TableId table : tables) {
       capturers.put(
           table,
-          SpannerTableTailer.newBuilder(builder.client, table)
+          SpannerTableTailer.newBuilder(spanner, table)
               .setCommitTimestampRepository(builder.commitTimestampRepository)
               .setPollInterval(builder.pollInterval)
               .setExecutor(executor)
@@ -173,7 +186,7 @@ public class SpannerDatabaseTailer implements SpannerDatabaseChangeCapturer {
     }
   }
 
-  private ImmutableList<String> allTableNames(DatabaseClient client) {
+  private ImmutableList<TableId> allTableNames(DatabaseClient client) {
     Statement statement =
         Statement.newBuilder(LIST_TABLE_NAMES_STATEMENT)
             .bind("excluded")
@@ -183,18 +196,21 @@ public class SpannerDatabaseTailer implements SpannerDatabaseChangeCapturer {
             .bind("included")
             .toStringArray(includedTables)
             .bind("schema")
-            .to("")
+            .to(schema)
             .bind("catalog")
-            .to("")
+            .to(catalog)
             .build();
     return client
         .singleUse()
         .executeQueryAsync(statement)
         .toList(
-            new Function<StructReader, String>() {
+            new Function<StructReader, TableId>() {
               @Override
-              public String apply(StructReader input) {
-                return input.getString(0);
+              public TableId apply(StructReader input) {
+                return TableId.newBuilder(databaseId, input.getString(0))
+                    .setCatalog(catalog)
+                    .setSchema(schema)
+                    .build();
               }
             });
   }
@@ -229,17 +245,12 @@ public class SpannerDatabaseTailer implements SpannerDatabaseChangeCapturer {
   }
 
   @Override
-  public DatabaseClient getDatabaseClient() {
-    return client;
-  }
-
-  @Override
-  public ImmutableList<String> getTables() {
+  public ImmutableList<TableId> getTables() {
     return tables;
   }
 
   @Override
-  public SpannerTableChangeCapturer getCapturer(String table) {
+  public SpannerTableChangeCapturer getCapturer(TableId table) {
     return capturers.get(table);
   }
 }

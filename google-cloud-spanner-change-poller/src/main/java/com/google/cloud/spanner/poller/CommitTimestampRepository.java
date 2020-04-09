@@ -24,9 +24,9 @@ import com.google.cloud.Timestamp;
  */
 public interface CommitTimestampRepository {
 
-  /** Returns the last seen commit timestamp for the given table name. */
-  Timestamp get(String table);
+  /** Returns the last seen commit timestamp for the given table. */
+  Timestamp get(TableId table);
 
-  /** Sets the last seen commit timestamp for the given table name. */
-  void set(String table, Timestamp commitTimestamp);
+  /** Sets the last seen commit timestamp for the given table. */
+  void set(TableId table, Timestamp commitTimestamp);
 }

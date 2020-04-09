@@ -28,17 +28,25 @@ public class SpannerUtils {
   /** Query for getting the column of a table that holds the commit timestamp. */
   @VisibleForTesting
   public static final String FIND_COMMIT_TIMESTAMP_COLUMN_QUERY =
-      "SELECT COLUMN_NAME, OPTION_NAME, OPTION_VALUE FROM INFORMATION_SCHEMA.COLUMN_OPTIONS WHERE TABLE_NAME = @table";
+      "SELECT COLUMN_NAME, OPTION_NAME, OPTION_VALUE\n"
+          + "FROM INFORMATION_SCHEMA.COLUMN_OPTIONS\n"
+          + "WHERE TABLE_CATALOG = @catalog\n"
+          + "AND TABLE_SCHEMA = @schema\n"
+          + "AND TABLE_NAME = @table";
 
   /** Returns the name of the commit timestamp column of the given table. */
-  public static String getTimestampColumn(DatabaseClient client, String table) {
+  public static String getTimestampColumn(DatabaseClient client, TableId table) {
     try (ResultSet rs =
         client
             .singleUse()
             .executeQuery(
                 Statement.newBuilder(FIND_COMMIT_TIMESTAMP_COLUMN_QUERY)
+                    .bind("catalog")
+                    .to(table.getCatalog())
+                    .bind("schema")
+                    .to(table.getSchema())
                     .bind("table")
-                    .to(table)
+                    .to(table.getTable())
                     .build())) {
       while (rs.next()) {
         if (rs.getString("OPTION_NAME").equals("allow_commit_timestamp")) {

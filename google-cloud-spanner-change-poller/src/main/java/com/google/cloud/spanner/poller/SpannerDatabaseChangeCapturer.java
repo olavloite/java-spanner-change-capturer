@@ -17,21 +17,16 @@
 package com.google.cloud.spanner.poller;
 
 import com.google.api.core.ApiFuture;
-import com.google.cloud.spanner.DatabaseClient;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer.RowChangeCallback;
 import java.util.Collection;
 
 /** Interface for capturing changes to a Spanner database. */
 public interface SpannerDatabaseChangeCapturer {
-
-  /** Returns the {@link DatabaseClient} used for this capturer. */
-  DatabaseClient getDatabaseClient();
-
   /** Returns the names of the tables that is monitored by this capturer. */
-  Collection<String> getTables();
+  Collection<TableId> getTables();
 
   /** Returns the capturer for the given table. */
-  SpannerTableChangeCapturer getCapturer(String table);
+  SpannerTableChangeCapturer getCapturer(TableId table);
 
   /**
    * Run this change capturer and report all changed rows to the given {@link RowChangeCallback}.

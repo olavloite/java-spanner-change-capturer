@@ -27,16 +27,19 @@ import com.google.cloud.spanner.Spanner;
 import com.google.cloud.spanner.SpannerOptions;
 import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.Value;
+import com.google.cloud.spanner.poller.SpannerCommitTimestampRepository;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer.Row;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer.RowChangeCallback;
 import com.google.cloud.spanner.poller.SpannerTableTailer;
-import com.google.common.base.Stopwatch;
-import java.util.ArrayList;
+import com.google.cloud.spanner.poller.TableId;
+import com.google.common.collect.ImmutableList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Queue;
 import java.util.Random;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 import org.junit.AfterClass;
@@ -53,6 +56,8 @@ public class ITSpannerTableTailerTest {
       String.format("cdc-db-%08d", new Random().nextInt(100000000));
   private static Spanner spanner;
   private static Database database;
+  private final Queue<Struct> receivedChanges = new ConcurrentLinkedQueue<>();
+  private volatile CountDownLatch latch = new CountDownLatch(0);
 
   @BeforeClass
   public static void setup() throws Exception {
@@ -68,9 +73,8 @@ public class ITSpannerTableTailerTest {
             .createDatabase(
                 ITConfig.SPANNER_INSTANCE_ID,
                 DATABASE_ID,
-                Arrays.asList(
-                    "CREATE TABLE NUMBERS (ID INT64 NOT NULL, NAME STRING(100), LAST_MODIFIED TIMESTAMP OPTIONS (allow_commit_timestamp=true)) PRIMARY KEY (ID)",
-                    "CREATE TABLE LAST_SEEN_COMMIT_TIMESTAMPS (TABLE_NAME STRING(MAX) NOT NULL, LAST_SEEN_COMMIT_TIMESTAMP TIMESTAMP NOT NULL) PRIMARY KEY (TABLE_NAME)"))
+                Collections.singleton(
+                    "CREATE TABLE NUMBERS (ID INT64 NOT NULL, NAME STRING(100), LAST_MODIFIED TIMESTAMP OPTIONS (allow_commit_timestamp=true)) PRIMARY KEY (ID)"))
             .get();
     logger.info(String.format("Created database %s", DATABASE_ID.toString()));
   }
@@ -82,23 +86,30 @@ public class ITSpannerTableTailerTest {
   }
 
   @Test
-  public void testSpannerTailer() throws InterruptedException {
-    DatabaseClient client = spanner.getDatabaseClient(database.getId());
+  public void testSpannerTailer() throws Exception {
     SpannerTableTailer tailer =
-        SpannerTableTailer.newBuilder(client, "NUMBERS")
+        SpannerTableTailer.newBuilder(spanner, TableId.of(database.getId(), "NUMBERS"))
             .setPollInterval(Duration.ofMillis(10L))
+            .setCommitTimestampRepository(
+                SpannerCommitTimestampRepository.newBuilder(spanner, database.getId())
+                    .setInitialCommitTimestamp(Timestamp.MIN_VALUE)
+                    .setCreateTableIfNotExists()
+                    .build())
             .build();
-    final Queue<Struct> changes = new ConcurrentLinkedQueue<>();
     tailer.start(
         new RowChangeCallback() {
           @Override
-          public void rowChange(String table, Row row, Timestamp commitTimestamp) {
+          public void rowChange(TableId table, Row row, Timestamp commitTimestamp) {
             logger.info(
                 String.format(
                     "Received changed for table %s: %s", table, row.asStruct().toString()));
-            changes.add(row.asStruct());
+            receivedChanges.add(row.asStruct());
+            latch.countDown();
           }
         });
+
+    DatabaseClient client = spanner.getDatabaseClient(database.getId());
+    latch = new CountDownLatch(3);
     Timestamp commitTs =
         client.writeAtLeastOnce(
             Arrays.asList(
@@ -126,7 +137,8 @@ public class ITSpannerTableTailerTest {
                     .set("LAST_MODIFIED")
                     .to(Value.COMMIT_TIMESTAMP)
                     .build()));
-    List<Struct> inserts = retrieveChanges(changes, 3);
+
+    List<Struct> inserts = drainChanges();
     assertThat(inserts).hasSize(3);
     assertThat(inserts)
         .containsExactly(
@@ -155,6 +167,7 @@ public class ITSpannerTableTailerTest {
                 .to(commitTs)
                 .build());
 
+    latch = new CountDownLatch(2);
     commitTs =
         client.writeAtLeastOnce(
             Arrays.asList(
@@ -174,7 +187,8 @@ public class ITSpannerTableTailerTest {
                     .set("LAST_MODIFIED")
                     .to(Value.COMMIT_TIMESTAMP)
                     .build()));
-    inserts = retrieveChanges(changes, 2);
+
+    inserts = drainChanges();
     assertThat(inserts).hasSize(2);
     assertThat(inserts)
         .containsExactly(
@@ -195,6 +209,7 @@ public class ITSpannerTableTailerTest {
                 .to(commitTs)
                 .build());
 
+    latch = new CountDownLatch(2);
     commitTs =
         client.writeAtLeastOnce(
             Arrays.asList(
@@ -214,7 +229,8 @@ public class ITSpannerTableTailerTest {
                     .set("LAST_MODIFIED")
                     .to(Value.COMMIT_TIMESTAMP)
                     .build()));
-    List<Struct> updates = retrieveChanges(changes, 2);
+
+    List<Struct> updates = drainChanges();
     assertThat(updates).hasSize(2);
     assertThat(updates)
         .containsExactly(
@@ -241,17 +257,14 @@ public class ITSpannerTableTailerTest {
             Arrays.asList(
                 Mutation.delete("NUMBERS", Key.of(2L)), Mutation.delete("NUMBERS", Key.of(3L))));
     Thread.sleep(500L);
-    assertThat(changes).isEmpty();
+    assertThat(receivedChanges).isEmpty();
+    tailer.stopAsync().get();
   }
 
-  private List<Struct> retrieveChanges(Queue<Struct> changes, int number) {
-    Stopwatch watch = Stopwatch.createStarted();
-    List<Struct> res = new ArrayList<>(number);
-    while (res.size() < number && watch.elapsed(TimeUnit.SECONDS) < 5L) {
-      if (changes.peek() != null) {
-        res.add(changes.remove());
-      }
-    }
-    return res;
+  private ImmutableList<Struct> drainChanges() throws Exception {
+    assertThat(latch.await(5L, TimeUnit.SECONDS)).isTrue();
+    ImmutableList<Struct> changes = ImmutableList.copyOf(receivedChanges);
+    receivedChanges.clear();
+    return changes;
   }
 }

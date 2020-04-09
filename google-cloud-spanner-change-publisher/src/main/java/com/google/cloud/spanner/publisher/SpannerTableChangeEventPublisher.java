@@ -33,14 +33,18 @@ import com.google.cloud.pubsub.v1.stub.PublisherStubSettings;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer.Row;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer.RowChangeCallback;
+import com.google.cloud.spanner.poller.TableId;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Stopwatch;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.pubsub.v1.PubsubMessage;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import java.io.IOException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -57,12 +61,12 @@ public class SpannerTableChangeEventPublisher {
   /** Interface for getting a callback when a message is published to PubSub. */
   public static interface PublishListener {
     /** Called when a change is successfully published to PubSub. */
-    void onPublished(String table, Timestamp commitTimestamp, String messageId);
+    void onPublished(TableId table, Timestamp commitTimestamp, String messageId);
   }
 
   private static final class NoOpListener implements PublishListener {
     @Override
-    public void onPublished(String table, Timestamp commitTimestamp, String messageId) {}
+    public void onPublished(TableId table, Timestamp commitTimestamp, String messageId) {}
   }
 
   public static class Builder {
@@ -144,6 +148,7 @@ public class SpannerTableChangeEventPublisher {
 
   private boolean started = false;
   private boolean stopped = false;
+  private ApiFuture<Void> capturerStopFuture;
   private final Publisher publisher;
   private final PublishListener listener;
   private final SpannerTableChangeCapturer capturer;
@@ -188,7 +193,7 @@ public class SpannerTableChangeEventPublisher {
     capturer.start(
         new RowChangeCallback() {
           @Override
-          public void rowChange(final String table, Row row, final Timestamp commitTimestamp) {
+          public void rowChange(final TableId table, Row row, final Timestamp commitTimestamp) {
             // Only use resources to convert the row to a string if we are actually going to log it.
             final String rowString =
                 logger.isLoggable(Level.FINE) ? row.asStruct().toString() : null;
@@ -197,7 +202,10 @@ public class SpannerTableChangeEventPublisher {
                 publisher.publish(
                     PubsubMessage.newBuilder()
                         .setData(converter.makeRecord(row))
-                        .putAttributes("Table", table)
+                        .putAttributes("Database", table.getDatabaseId().getName())
+                        .putAttributes("Catalog", table.getCatalog())
+                        .putAttributes("Schema", table.getSchema())
+                        .putAttributes("Table", table.getTable())
                         .putAttributes("Timestamp", commitTimestamp.toString())
                         .build());
             ApiFutures.addCallback(
@@ -229,11 +237,20 @@ public class SpannerTableChangeEventPublisher {
   public void stop() {
     Preconditions.checkState(started, "This event publisher has not been started");
     Preconditions.checkState(!stopped, "This event publisher has already been stopped");
-    capturer.stopAsync();
+    stopped = true;
+    capturerStopFuture = capturer.stopAsync();
     publisher.shutdown();
   }
 
   public boolean awaitTermination(long duration, TimeUnit unit) throws InterruptedException {
-    return publisher.awaitTermination(duration, unit);
+    Preconditions.checkState(stopped, "This event publisher has not been stopped");
+    Stopwatch watch = Stopwatch.createStarted();
+    try {
+      capturerStopFuture.get(duration, unit);
+    } catch (ExecutionException | TimeoutException e) {
+      return false;
+    }
+    long remaining = duration - watch.elapsed(unit) + 1L;
+    return publisher.awaitTermination(remaining, unit);
   }
 }

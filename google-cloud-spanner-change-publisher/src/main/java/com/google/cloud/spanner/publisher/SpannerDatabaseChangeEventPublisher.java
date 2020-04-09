@@ -20,6 +20,7 @@ import com.google.auth.Credentials;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.pubsub.v1.stub.PublisherStubSettings;
 import com.google.cloud.spanner.poller.SpannerDatabaseChangeCapturer;
+import com.google.cloud.spanner.poller.TableId;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
@@ -99,10 +100,18 @@ public class SpannerDatabaseChangeEventPublisher {
   private SpannerDatabaseChangeEventPublisher(Builder builder) throws IOException {
     this.capturer = builder.capturer;
     this.publishers = new ArrayList<>(capturer.getTables().size());
-    for (String table : capturer.getTables()) {
+    for (TableId table : capturer.getTables()) {
       SpannerTableChangeEventPublisher.Builder publisherBuilder =
           SpannerTableChangeEventPublisher.newBuilder(capturer.getCapturer(table))
-              .setTopicName(builder.topicNameFormat.replace("%table%", table))
+              .setTopicName(
+                  builder
+                      .topicNameFormat
+                      .replace("%project%", table.getDatabaseId().getInstanceId().getProject())
+                      .replace("%instance%", table.getDatabaseId().getInstanceId().getInstance())
+                      .replace("%database%", table.getDatabaseId().getDatabase())
+                      .replace("%catalog%", table.getCatalog())
+                      .replace("%schema%", table.getSchema())
+                      .replace("%table%", table.getTable()))
               .setEndpoint(builder.endpoint);
       if (builder.credentials != null) {
         publisherBuilder.setCredentials(builder.credentials);
@@ -134,10 +143,11 @@ public class SpannerDatabaseChangeEventPublisher {
   }
 
   public boolean awaitTermination(long duration, TimeUnit unit) throws InterruptedException {
+    Preconditions.checkArgument(stopped, "This event publisher has not been stopped");
     Stopwatch watch = Stopwatch.createStarted();
     boolean res = true;
     for (SpannerTableChangeEventPublisher publisher : publishers) {
-      long remainingDuration = duration - watch.elapsed(unit);
+      long remainingDuration = duration - watch.elapsed(unit) + 1L;
       if (remainingDuration <= 0) {
         return false;
       }

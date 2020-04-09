@@ -19,6 +19,7 @@ package com.google.cloud.spanner.publisher.it;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.google.api.gax.core.FixedCredentialsProvider;
+import com.google.cloud.Timestamp;
 import com.google.cloud.pubsub.v1.AckReplyConsumer;
 import com.google.cloud.pubsub.v1.MessageReceiver;
 import com.google.cloud.pubsub.v1.Subscriber;
@@ -32,8 +33,10 @@ import com.google.cloud.spanner.Mutation;
 import com.google.cloud.spanner.Spanner;
 import com.google.cloud.spanner.SpannerOptions;
 import com.google.cloud.spanner.Value;
+import com.google.cloud.spanner.poller.SpannerCommitTimestampRepository;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer;
 import com.google.cloud.spanner.poller.SpannerTableTailer;
+import com.google.cloud.spanner.poller.TableId;
 import com.google.cloud.spanner.publisher.SpannerTableChangeEventPublisher;
 import com.google.pubsub.v1.PubsubMessage;
 import com.google.pubsub.v1.PushConfig;
@@ -41,7 +44,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
@@ -56,8 +58,6 @@ import org.threeten.bp.Duration;
 public class ITSpannerTableChangeEventPublisherTest {
   private static final Logger logger =
       Logger.getLogger(ITSpannerTableChangeEventPublisherTest.class.getName());
-  private static final String DATABASE_ID =
-      String.format("cdc-db-%08d", new Random().nextInt(100000000));
   private static Spanner spanner;
   private static TopicAdminClient topicAdminClient;
   private static SubscriptionAdminClient subAdminClient;
@@ -80,12 +80,11 @@ public class ITSpannerTableChangeEventPublisherTest {
             .getDatabaseAdminClient()
             .createDatabase(
                 ITConfig.SPANNER_INSTANCE_ID,
-                DATABASE_ID,
-                Arrays.asList(
-                    "CREATE TABLE NUMBERS (ID INT64 NOT NULL, NAME STRING(100), LAST_MODIFIED TIMESTAMP OPTIONS (allow_commit_timestamp=true)) PRIMARY KEY (ID)",
-                    "CREATE TABLE LAST_SEEN_COMMIT_TIMESTAMPS (TABLE_NAME STRING(MAX) NOT NULL, LAST_SEEN_COMMIT_TIMESTAMP TIMESTAMP NOT NULL) PRIMARY KEY (TABLE_NAME)"))
+                ITConfig.DATABASE_ID,
+                Collections.singleton(
+                    "CREATE TABLE NUMBERS (ID INT64 NOT NULL, NAME STRING(100), LAST_MODIFIED TIMESTAMP OPTIONS (allow_commit_timestamp=true)) PRIMARY KEY (ID)"))
             .get();
-    logger.info(String.format("Created database %s", DATABASE_ID.toString()));
+    logger.info(String.format("Created database %s", ITConfig.DATABASE_ID.toString()));
 
     topicAdminClient =
         TopicAdminClient.create(
@@ -156,8 +155,13 @@ public class ITSpannerTableChangeEventPublisherTest {
   public void testEventPublisher() throws Exception {
     DatabaseClient client = spanner.getDatabaseClient(database.getId());
     SpannerTableChangeCapturer capturer =
-        SpannerTableTailer.newBuilder(client, "NUMBERS")
+        SpannerTableTailer.newBuilder(spanner, TableId.of(database.getId(), "NUMBERS"))
             .setPollInterval(Duration.ofMillis(50L))
+            .setCommitTimestampRepository(
+                SpannerCommitTimestampRepository.newBuilder(spanner, database.getId())
+                    .setInitialCommitTimestamp(Timestamp.MIN_VALUE)
+                    .setCreateTableIfNotExists()
+                    .build())
             .build();
     SpannerTableChangeEventPublisher eventPublisher =
         SpannerTableChangeEventPublisher.newBuilder(capturer)
@@ -198,5 +202,6 @@ public class ITSpannerTableChangeEventPublisherTest {
     receivedMessagesCount.await(10L, TimeUnit.SECONDS);
     assertThat(receivedMessages).hasSize(3);
     eventPublisher.stop();
+    assertThat(eventPublisher.awaitTermination(10L, TimeUnit.SECONDS)).isTrue();
   }
 }

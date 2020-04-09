@@ -24,6 +24,7 @@ import com.google.cloud.ByteArray;
 import com.google.cloud.Date;
 import com.google.cloud.Timestamp;
 import com.google.cloud.spanner.DatabaseClient;
+import com.google.cloud.spanner.DatabaseId;
 import com.google.cloud.spanner.ReadContext;
 import com.google.cloud.spanner.ResultSet;
 import com.google.cloud.spanner.ResultSets;
@@ -32,6 +33,7 @@ import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.Type;
 import com.google.cloud.spanner.Type.StructField;
 import com.google.cloud.spanner.poller.SpannerUtils;
+import com.google.cloud.spanner.poller.TableId;
 import com.google.cloud.spanner.publisher.SpannerToAvro.SchemaSet;
 import com.google.protobuf.ByteString;
 import java.io.IOException;
@@ -51,8 +53,6 @@ import org.junit.runners.JUnit4;
 
 @RunWith(JUnit4.class)
 public class SpannerToAvroTest {
-  static final String SCHEMA_QUERY =
-      "SELECT COLUMN_NAME, SPANNER_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=@table ORDER BY ORDINAL_POSITION";
   private static final Type SCHEMA_ROW_TYPE =
       Type.struct(
           StructField.of("COLUMN_NAME", Type.string()),
@@ -295,7 +295,10 @@ public class SpannerToAvroTest {
   public void testConvertTableToSchemaSet() {
     SchemaSet set =
         SpannerToAvro.convertTableToSchemaSet(
-            "FOO", "NAMESPACE", createSchemaResultSet(), "commitTimestamp");
+            TableId.of(DatabaseId.of("p", "i", "d"), "FOO"),
+            "NAMESPACE",
+            createSchemaResultSet(),
+            "commitTimestamp");
     Schema schema = set.avroSchema();
     assertThat(schema.getField("C1").schema()).isEqualTo(SchemaBuilder.builder().longType());
     assertThat(schema.getField("C1").schema().isNullable()).isFalse();
@@ -538,12 +541,27 @@ public class SpannerToAvroTest {
     ReadContext context = mock(ReadContext.class);
     when(client.singleUse()).thenReturn(context);
     when(context.executeQuery(
-            Statement.newBuilder(SpannerUtils.FIND_COMMIT_TIMESTAMP_COLUMN_QUERY).bind("table").to("FOO").build()))
+            Statement.newBuilder(SpannerUtils.FIND_COMMIT_TIMESTAMP_COLUMN_QUERY)
+                .bind("catalog")
+                .to("")
+                .bind("schema")
+                .to("")
+                .bind("table")
+                .to("FOO")
+                .build()))
         .thenReturn(createTimestampColumnResultSet());
     when(context.executeQuery(
-            Statement.newBuilder(SpannerToAvro.SCHEMA_QUERY).bind("table").to("FOO").build()))
+            Statement.newBuilder(SpannerToAvro.SCHEMA_QUERY)
+                .bind("catalog")
+                .to("")
+                .bind("schema")
+                .to("")
+                .bind("table")
+                .to("FOO")
+                .build()))
         .thenReturn(createSchemaResultSet());
-    SpannerToAvro converter = new SpannerToAvro(client, "FOO");
+    SpannerToAvro converter =
+        new SpannerToAvro(client, TableId.of(DatabaseId.of("p", "i", "i"), "FOO"));
 
     Struct row =
         Struct.newBuilder()
@@ -623,7 +641,10 @@ public class SpannerToAvroTest {
     // Read the data back in.
     SchemaSet set =
         SpannerToAvro.convertTableToSchemaSet(
-            "FOO", "NAMESPACE", createSchemaResultSet(), "LastModifiedAt");
+            TableId.of(DatabaseId.of("p", "i", "i"), "FOO"),
+            "NAMESPACE",
+            createSchemaResultSet(),
+            "LastModifiedAt");
     BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(data.newInput(), null);
     GenericDatumReader<GenericRecord> reader = new GenericDatumReader<>(set.avroSchema());
     GenericRecord record = reader.read(null, decoder);

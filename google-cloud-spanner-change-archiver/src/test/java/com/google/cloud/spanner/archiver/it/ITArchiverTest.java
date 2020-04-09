@@ -46,8 +46,10 @@ import com.google.cloud.spanner.Mutation;
 import com.google.cloud.spanner.Spanner;
 import com.google.cloud.spanner.SpannerOptions;
 import com.google.cloud.spanner.Value;
+import com.google.cloud.spanner.poller.SpannerCommitTimestampRepository;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer;
 import com.google.cloud.spanner.poller.SpannerTableTailer;
+import com.google.cloud.spanner.poller.TableId;
 import com.google.cloud.spanner.publisher.SpannerTableChangeEventPublisher;
 import com.google.cloud.spanner.publisher.SpannerTableChangeEventPublisher.PublishListener;
 import com.google.cloud.storage.Blob;
@@ -105,9 +107,8 @@ public class ITArchiverTest {
             .createDatabase(
                 ITConfig.SPANNER_INSTANCE_ID,
                 ITConfig.DATABASE_ID,
-                Arrays.asList(
-                    "CREATE TABLE NUMBERS (ID INT64 NOT NULL, NAME STRING(100), LAST_MODIFIED TIMESTAMP OPTIONS (allow_commit_timestamp=true)) PRIMARY KEY (ID)",
-                    "CREATE TABLE LAST_SEEN_COMMIT_TIMESTAMPS (TABLE_NAME STRING(MAX) NOT NULL, LAST_SEEN_COMMIT_TIMESTAMP TIMESTAMP NOT NULL) PRIMARY KEY (TABLE_NAME)"))
+                Collections.singleton(
+                    "CREATE TABLE NUMBERS (ID INT64 NOT NULL, NAME STRING(100), LAST_MODIFIED TIMESTAMP OPTIONS (allow_commit_timestamp=true)) PRIMARY KEY (ID)"))
             .get();
     logger.info(String.format("Created database %s", ITConfig.DATABASE_ID.toString()));
 
@@ -314,8 +315,12 @@ public class ITArchiverTest {
     final CountDownLatch latch = new CountDownLatch(3);
     DatabaseClient client = spanner.getDatabaseClient(database.getId());
     SpannerTableChangeCapturer capturer =
-        SpannerTableTailer.newBuilder(client, "NUMBERS")
+        SpannerTableTailer.newBuilder(spanner, TableId.of(database.getId(), "NUMBERS"))
             .setPollInterval(Duration.ofMillis(50L))
+            .setCommitTimestampRepository(
+                SpannerCommitTimestampRepository.newBuilder(spanner, database.getId())
+                    .setCreateTableIfNotExists()
+                    .build())
             .build();
     SpannerTableChangeEventPublisher eventPublisher =
         SpannerTableChangeEventPublisher.newBuilder(capturer)
@@ -327,11 +332,17 @@ public class ITArchiverTest {
                 new PublishListener() {
                   @Override
                   public void onPublished(
-                      String table, Timestamp commitTimestamp, String messageId) {
+                      TableId table, Timestamp commitTimestamp, String messageId) {
                     expectedBlobIds.add(
                         BlobId.of(
                             ITConfig.STORAGE_BUCKET_NAME,
-                            table + "#" + commitTimestamp.toString() + "#" + messageId));
+                            table.getDatabaseId().getName()
+                                + "/"
+                                + table.getTable()
+                                + "-"
+                                + commitTimestamp.toString()
+                                + "-"
+                                + messageId));
                     latch.countDown();
                   }
                 })
@@ -372,11 +383,12 @@ public class ITArchiverTest {
     List<Blob> blobs;
     do {
       blobs = storage.get(expectedBlobIds);
-    } while (blobs.contains(null) && watch.elapsed(TimeUnit.SECONDS) <= 10L);
+    } while (blobs.contains(null) && watch.elapsed(TimeUnit.SECONDS) <= 20L);
     assertThat(blobs).doesNotContain(null);
+    assertThat(blobs).hasSize(expectedBlobIds.size());
     logger.log(Level.INFO, "Changes have been written to Cloud Storage");
 
     eventPublisher.stop();
-    eventPublisher.awaitTermination(5L, TimeUnit.SECONDS);
+    assertThat(eventPublisher.awaitTermination(10L, TimeUnit.SECONDS)).isTrue();
   }
 }

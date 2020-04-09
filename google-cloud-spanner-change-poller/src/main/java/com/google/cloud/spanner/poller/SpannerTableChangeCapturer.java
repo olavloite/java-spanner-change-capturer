@@ -29,7 +29,7 @@ public interface SpannerTableChangeCapturer {
   public DatabaseClient getDatabaseClient();
 
   /** Returns the name of the table that is monitored by this capturer. */
-  public String getTable();
+  public TableId getTable();
 
   /** Row is passed in to the change callback and allows access to the most recent data. */
   public static interface Row extends StructReader {
@@ -40,7 +40,7 @@ public interface SpannerTableChangeCapturer {
   /** Interface for receiving asynchronous callbacks when a row has been inserted or updated. */
   public static interface RowChangeCallback {
     /** Called once for each detected insert or update of a row. */
-    void rowChange(String table, Row row, Timestamp commitTimestamp);
+    void rowChange(TableId table, Row row, Timestamp commitTimestamp);
   }
 
   /**

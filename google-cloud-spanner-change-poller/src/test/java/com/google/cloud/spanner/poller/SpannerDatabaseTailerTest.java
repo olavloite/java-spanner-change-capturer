@@ -19,7 +19,6 @@ package com.google.cloud.spanner.poller;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.google.cloud.Timestamp;
-import com.google.cloud.spanner.DatabaseClient;
 import com.google.cloud.spanner.DatabaseId;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer.Row;
 import com.google.cloud.spanner.poller.SpannerTableChangeCapturer.RowChangeCallback;
@@ -35,19 +34,23 @@ import org.threeten.bp.Duration;
 public class SpannerDatabaseTailerTest extends AbstractMockServerTest {
   @Test
   public void testReceiveChanges() throws Exception {
-    DatabaseClient client = spanner.getDatabaseClient(DatabaseId.of("p", "i", "d"));
+    DatabaseId db = DatabaseId.of("p", "i", "d");
     try {
       SpannerDatabaseTailer tailer =
-          SpannerDatabaseTailer.newBuilder(client)
+          SpannerDatabaseTailer.newBuilder(spanner, db)
               .setAllTables()
               .setPollInterval(Duration.ofSeconds(100L))
+              .setCommitTimestampRepository(
+                  SpannerCommitTimestampRepository.newBuilder(spanner, db)
+                      .setInitialCommitTimestamp(Timestamp.MIN_VALUE)
+                      .build())
               .build();
       final AtomicInteger receivedRows = new AtomicInteger();
       final CountDownLatch latch = new CountDownLatch(SELECT_FOO_ROW_COUNT + SELECT_BAR_ROW_COUNT);
       tailer.start(
           new RowChangeCallback() {
             @Override
-            public void rowChange(String table, Row row, Timestamp commitTimestamp) {
+            public void rowChange(TableId table, Row row, Timestamp commitTimestamp) {
               latch.countDown();
               receivedRows.incrementAndGet();
             }

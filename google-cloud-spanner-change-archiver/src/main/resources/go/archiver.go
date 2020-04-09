@@ -45,7 +45,14 @@ func Archiver(ctx context.Context, msg pubsub.Message) error {
 	if !ok {
 		return fmt.Errorf("no value for environment variable BUCKET_NAME defined")
 	}
-	fileName := msg.Attributes["Table"] + "#" + msg.Attributes["Timestamp"] + "#" + meta.EventID
+	fileName := msg.Attributes["Database"] + "/"
+	if msg.Attributes["Catalog"] != "" {
+		fileName = fileName + msg.Attributes["Catalog"] + "-"
+	}
+	if msg.Attributes["Schema"] != "" {
+		fileName = fileName + msg.Attributes["Schema"] + "-"
+	}
+	fileName = fileName + msg.Attributes["Table"] + "-" + msg.Attributes["Timestamp"] + "-" + meta.EventID
 	err = writeMessageToStorage(ctx, bucketName, client, fileName, msg)
 	if err != nil {
 		return err
@@ -87,6 +94,10 @@ func writeMessageToStorage(
 	writer := client.Bucket(bucketName).Object(fileName).NewWriter(ctx)
 	writer.ContentType = "protobuf/bytes"
 	writer.Metadata = map[string]string{
+		"Database": msg.Attributes["Database"],
+		"Catalog": msg.Attributes["Catalog"],
+		"Schema": msg.Attributes["Schema"],
+		"Table": msg.Attributes["Table"],
 		"Timestamp": msg.Attributes["Timestamp"],
 	}
 	return writeDataFunc(writer, msg, bucketName, fileName)
