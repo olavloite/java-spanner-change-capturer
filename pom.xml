@@ -38,7 +38,7 @@
     <errorprone.version>2.3.4</errorprone.version>
     <autovalue.version>1.7</autovalue.version>
     <opencensus.version>0.26.0</opencensus.version>
-    <guava.version>28.2-android</guava.version>
+    <guava.version>29.0-android</guava.version>
   </properties>
   
   <dependencyManagement>
